@@ -1,12 +1,14 @@
 """
 Orquestração com LangGraph e DeepAgents.
-Implementa o fluxo de agentes usando StateGraph com desambiguação.
+Implementa o fluxo de agentes usando StateGraph com desambiguação e memória.
 
 Fluxo obrigatório:
-User Input → AmbiguityResolverAgent → PlannerAgent → Subagentes → CriticAgent → ResponseAgent
+User Input → Short-Term Memory → Long-Term Memory → PlannerAgent → Raio X →
+AmbiguityResolver → Subagentes → CriticAgent → ResponseAgent → MemoryAgent
 """
 
 import json
+import logging
 from typing import Annotated, Any, TypedDict
 
 from langchain_core.messages import AIMessage, HumanMessage
@@ -24,12 +26,15 @@ from app.config.agents import (
     VISUALIZATION_AGENT_CONFIG,
 )
 from app.governance.logging import SessionContext
+from app.memory.memory_agent import MemoryAgent, create_memory_agent
 from app.tools.databricks_tools import (
     describe_table,
     get_metadata,
     run_sql,
     sample_data,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class AgentState(TypedDict):
@@ -40,6 +45,7 @@ class AgentState(TypedDict):
     normalized_query: str
     active_domains: list[str]
     group_context: dict[str, Any]
+    user_id: str
     ambiguity_result: dict[str, Any]
     plan: list[dict[str, Any]]
     subagent_responses: list[dict[str, Any]]
@@ -49,6 +55,8 @@ class AgentState(TypedDict):
     session_id: str
     visualization_suggestion: str | None
     visualization_data: dict[str, Any] | None
+    memory_context: list[dict[str, Any]]
+    memory_status: dict[str, bool]
 
 
 DATABRICKS_TOOLS = [describe_table, sample_data, run_sql, get_metadata]
@@ -68,14 +76,17 @@ def parse_json_response(content: str) -> dict[str, Any] | None:
 
 def create_langgraph_workflow(
     session: SessionContext | None = None,
+    user_id: str | None = None,
 ) -> StateGraph:
     """
-    Cria o workflow usando LangGraph com fluxo de desambiguação.
+    Cria o workflow usando LangGraph com fluxo de desambiguação e memória.
 
-    Fluxo: AmbiguityResolver → Planner → Executor → Visualization → Critic → Response
+    Fluxo: MemoryRecall → AmbiguityResolver → Planner → Executor →
+           Visualization → Critic → Response → MemoryPersist
 
     Args:
         session: Contexto da sessão
+        user_id: Matrícula do usuário para memória
 
     Returns:
         Grafo compilado
@@ -83,6 +94,52 @@ def create_langgraph_workflow(
     from langchain_openai import ChatOpenAI
 
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+    memory_agent: MemoryAgent | None = None
+    if user_id:
+        memory_agent = create_memory_agent(user_id)
+
+    def memory_recall_node(state: AgentState) -> dict[str, Any]:
+        """
+        Nó de recuperação de memória - PRIMEIRO nó do fluxo.
+        Consulta memória de longo prazo para contexto relevante.
+        """
+        original_query = state["original_query"]
+        user_id = state.get("user_id", "")
+        memory_status = state.get("memory_status", {}).copy()
+
+        memory_context = []
+
+        if memory_agent and user_id:
+            ambiguity_memories = memory_agent.recall_ambiguity_resolutions(
+                original_query
+            )
+            for mem in ambiguity_memories[:5]:
+                memory_context.append({
+                    "tipo": "resolucao_ambiguidade",
+                    "conteudo": mem.conteudo,
+                    "dominio": mem.dominio,
+                })
+
+            preferences = memory_agent.recall_user_preferences()
+            for pref in preferences[:3]:
+                memory_context.append({
+                    "tipo": "preferencia",
+                    "conteudo": pref.conteudo,
+                })
+
+            memory_status["memoria_consultada"] = True
+            logger.info(f"Memory recall: {len(memory_context)} entries found")
+        else:
+            memory_status["memoria_consultada"] = False
+
+        memory_status["contexto_carregado"] = True
+
+        return {
+            "memory_context": memory_context,
+            "memory_status": memory_status,
+            "messages": [AIMessage(content=f"Memória consultada: {len(memory_context)} entradas")],
+        }
 
     def ambiguity_resolver_node(state: AgentState) -> dict[str, Any]:
         """
@@ -412,40 +469,75 @@ Crie uma resposta final clara, completa e em linguagem executiva."""
 
         final_response = response.content
 
+        memory_status = state.get("memory_status", {}).copy()
+        memory_status["resposta_entregue"] = True
+
         return {
             "final_response": final_response,
+            "memory_status": memory_status,
             "messages": [AIMessage(content=final_response)],
         }
 
+    def memory_persist_node(state: AgentState) -> dict[str, Any]:
+        """
+        Nó de persistência de memória - ÚLTIMO nó do fluxo.
+        Decide o que deve ser memorizado para longo prazo.
+        """
+        ambiguity_result = state.get("ambiguity_result", {})
+        user_id = state.get("user_id", "")
+
+        if not memory_agent or not user_id:
+            return {}
+
+        ambiguities = ambiguity_result.get("ambiguities_detected", [])
+        for amb in ambiguities:
+            term = amb.get("term", "")
+            resolution = amb.get("resolution", "")
+            if term and resolution:
+                memory_agent.memorize_ambiguity_resolution(
+                    term,
+                    resolution,
+                    dominio=amb.get("domain"),
+                )
+                logger.info(f"Memorized ambiguity: {term} -> {resolution}")
+
+        return {}
+
     workflow = StateGraph(AgentState)
 
+    workflow.add_node("memory_recall", memory_recall_node)
     workflow.add_node("ambiguity_resolver", ambiguity_resolver_node)
     workflow.add_node("planner", planner_node)
     workflow.add_node("executor", executor_node)
     workflow.add_node("visualization", visualization_node)
     workflow.add_node("critic", critic_node)
     workflow.add_node("response", response_node)
+    workflow.add_node("memory_persist", memory_persist_node)
 
-    workflow.set_entry_point("ambiguity_resolver")
+    workflow.set_entry_point("memory_recall")
+    workflow.add_edge("memory_recall", "ambiguity_resolver")
     workflow.add_edge("ambiguity_resolver", "planner")
     workflow.add_edge("planner", "executor")
     workflow.add_edge("executor", "visualization")
     workflow.add_edge("visualization", "critic")
     workflow.add_edge("critic", "response")
-    workflow.add_edge("response", END)
+    workflow.add_edge("response", "memory_persist")
+    workflow.add_edge("memory_persist", END)
 
     return workflow.compile()
 
 
 class DeepAgentOrchestrator:
-    """Orquestrador usando LangGraph com fluxo de desambiguação."""
+    """Orquestrador usando LangGraph com fluxo de desambiguação e memória."""
 
     def __init__(
         self,
         session: SessionContext | None = None,
+        user_id: str | None = None,
     ):
         self.session = session
-        self.agent = create_langgraph_workflow(session)
+        self.user_id = user_id
+        self.agent = create_langgraph_workflow(session, user_id)
 
     def process_query(
         self,
@@ -454,7 +546,7 @@ class DeepAgentOrchestrator:
         group_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
-        Processa uma pergunta usando o orquestrador com desambiguação.
+        Processa uma pergunta usando o orquestrador com desambiguação e memória.
 
         Args:
             query: Pergunta do usuário
@@ -462,7 +554,7 @@ class DeepAgentOrchestrator:
             group_context: Contexto do grupo selecionado (código, nome, CNPJ, etc.)
 
         Returns:
-            Dicionário com resposta e metadados incluindo desambiguação
+            Dicionário com resposta e metadados incluindo desambiguação e status de memória
         """
         if self.session:
             self.session.log_user_query(query, str(active_domains))
@@ -479,6 +571,7 @@ class DeepAgentOrchestrator:
             "normalized_query": "",
             "active_domains": active_domains,
             "group_context": group_context,
+            "user_id": self.user_id or "",
             "ambiguity_result": {},
             "plan": [],
             "subagent_responses": [],
@@ -488,6 +581,14 @@ class DeepAgentOrchestrator:
             "session_id": self.session.session_id if self.session else "",
             "visualization_suggestion": None,
             "visualization_data": None,
+            "memory_context": [],
+            "memory_status": {
+                "contexto_carregado": False,
+                "memoria_consultada": False,
+                "raio_x_validado": False,
+                "ambiguidade_resolvida": False,
+                "resposta_entregue": False,
+            },
         }
 
         result = self.agent.invoke(initial_state)
@@ -510,11 +611,14 @@ class DeepAgentOrchestrator:
             "visualization_suggestion": result.get("visualization_suggestion"),
             "visualization_data": result.get("visualization_data"),
             "session_id": result.get("session_id", ""),
+            "memory_context": result.get("memory_context", []),
+            "memory_status": result.get("memory_status", {}),
         }
 
 
 def create_deep_orchestrator_instance(
     session: SessionContext | None = None,
+    user_id: str | None = None,
 ) -> DeepAgentOrchestrator:
-    """Factory function para criar o orquestrador."""
-    return DeepAgentOrchestrator(session=session)
+    """Factory function para criar o orquestrador com suporte a memória."""
+    return DeepAgentOrchestrator(session=session, user_id=user_id)
