@@ -39,6 +39,7 @@ class AgentState(TypedDict):
     original_query: str
     normalized_query: str
     active_domains: list[str]
+    group_context: dict[str, Any]
     ambiguity_result: dict[str, Any]
     plan: list[dict[str, Any]]
     subagent_responses: list[dict[str, Any]]
@@ -90,13 +91,28 @@ def create_langgraph_workflow(
         """
         original_query = state["original_query"]
         active_domains = state.get("active_domains", [])
+        group_context = state.get("group_context", {})
 
         domains_text = ", ".join(active_domains) if active_domains else "todos os domínios"
+
+        group_info = ""
+        if group_context:
+            group_info = f"""
+Contexto do Grupo Selecionado:
+- Código: {group_context.get('codigo_grupo', 'N/A')}
+- Nome: {group_context.get('nome_grupo', 'N/A')}
+- CNPJ: {group_context.get('cnpj', 'N/A')}
+- Razão Social: {group_context.get('razao_social', 'N/A')}
+- Rating: {group_context.get('rating', 'N/A')}
+- Sócios: {group_context.get('quantidade_socios', 'N/A')}
+- Principalidade: {group_context.get('principalidade', 'N/A')}
+- Produtos: {group_context.get('quantidade_produtos', 'N/A')}
+"""
 
         prompt = f"""{AMBIGUITY_RESOLVER_AGENT_CONFIG.system_prompt}
 
 Domínios ativos selecionados pelo usuário: {domains_text}
-
+{group_info}
 Pergunta do usuário: {original_query}
 
 Analise a pergunta e retorne o JSON com a desambiguação."""
@@ -180,9 +196,24 @@ Crie um plano de execução considerando apenas os domínios ativos."""
         normalized_query = state.get("normalized_query", state["original_query"])
         plan = state.get("plan", [])
         active_domains = state.get("active_domains", [])
+        group_context = state.get("group_context", {})
         responses = []
 
         llm_with_tools = llm.bind_tools(DATABRICKS_TOOLS)
+
+        group_info = ""
+        if group_context:
+            group_info = f"""
+Contexto do Grupo em Análise:
+- Código: {group_context.get('codigo_grupo', 'N/A')}
+- Nome: {group_context.get('nome_grupo', 'N/A')}
+- CNPJ: {group_context.get('cnpj', 'N/A')}
+- Razão Social: {group_context.get('razao_social', 'N/A')}
+- Rating: {group_context.get('rating', 'N/A')}
+- Sócios: {group_context.get('quantidade_socios', 'N/A')}
+- Principalidade: {group_context.get('principalidade', 'N/A')}
+- Produtos: {group_context.get('quantidade_produtos', 'N/A')}
+"""
 
         for step in plan:
             agent_name = step.get("agent", "")
@@ -205,8 +236,9 @@ Crie um plano de execução considerando apenas os domínios ativos."""
                 domain = "rentabilidade"
 
             if config and (not active_domains or domain in active_domains):
+                task_with_context = f"{config.system_prompt}\n{group_info}\nTarefa: {task}"
                 messages = [
-                    HumanMessage(content=f"{config.system_prompt}\n\nTarefa: {task}"),
+                    HumanMessage(content=task_with_context),
                 ]
                 response = llm_with_tools.invoke(messages)
                 responses.append({
@@ -419,6 +451,7 @@ class DeepAgentOrchestrator:
         self,
         query: str,
         active_domains: list[str] | None = None,
+        group_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
         Processa uma pergunta usando o orquestrador com desambiguação.
@@ -426,6 +459,7 @@ class DeepAgentOrchestrator:
         Args:
             query: Pergunta do usuário
             active_domains: Lista de domínios ativos selecionados pelo usuário
+            group_context: Contexto do grupo selecionado (código, nome, CNPJ, etc.)
 
         Returns:
             Dicionário com resposta e metadados incluindo desambiguação
@@ -436,11 +470,15 @@ class DeepAgentOrchestrator:
         if active_domains is None:
             active_domains = []
 
+        if group_context is None:
+            group_context = {}
+
         initial_state: AgentState = {
             "messages": [],
             "original_query": query,
             "normalized_query": "",
             "active_domains": active_domains,
+            "group_context": group_context,
             "ambiguity_result": {},
             "plan": [],
             "subagent_responses": [],
