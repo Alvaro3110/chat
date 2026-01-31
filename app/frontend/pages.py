@@ -548,6 +548,30 @@ def render_chat_page():
 
         st.markdown("---")
 
+        st.markdown("### Modelo Ativo")
+        active_model = st.session_state.get("active_model", st.session_state.get("selected_model", "N/A"))
+        selected_provider = st.session_state.get("selected_provider", "N/A")
+
+        from app.config.models import get_model_config
+        model_config = get_model_config(active_model) if active_model != "N/A" else None
+
+        if model_config:
+            provider_display = model_config.provider.value.upper()
+            st.markdown(f"**Provider:** {provider_display}")
+            st.markdown(f"**Modelo:** {model_config.display_name}")
+            st.markdown(f"**Endpoint:** `{model_config.endpoint_name or model_config.model_name}`")
+            st.markdown(f"**Task:** {model_config.task.value}")
+
+            if model_config.provider.value == "databricks":
+                st.success("Databricks ativo")
+            else:
+                st.warning("OpenAI selecionado explicitamente")
+        else:
+            st.markdown(f"**Provider:** {selected_provider}")
+            st.markdown(f"**Modelo:** {active_model}")
+
+        st.markdown("---")
+
         if st.button("Alterar Grupo", use_container_width=True):
             st.session_state.selected_group = None
             st.session_state.chat_history = []
@@ -577,13 +601,14 @@ def render_chat_page():
         st.markdown("- Databricks")
 
         st.markdown("---")
-        st.markdown("**Status da Memória:**")
+        st.markdown("**Status do Pipeline:**")
         memory_status = st.session_state.get("memory_status", {})
         status_items = [
             ("contexto_carregado", "Contexto carregado"),
             ("memoria_consultada", "Memória consultada"),
-            ("raio_x_validado", "Raio X validado"),
             ("ambiguidade_resolvida", "Ambiguidade resolvida"),
+            ("subagentes_executados", "Subagentes executados"),
+            ("resposta_validada", "Resposta validada"),
             ("resposta_entregue", "Resposta entregue"),
         ]
         for key, label in status_items:
