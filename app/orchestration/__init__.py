@@ -3,7 +3,6 @@
 from app.orchestration.critic import CriticAgent, create_critic_agent
 from app.orchestration.graph import (
     DeepAgentOrchestrator,
-    create_deep_orchestrator,
     create_deep_orchestrator_instance,
     create_langgraph_workflow,
 )
@@ -21,7 +20,6 @@ __all__ = [
     "create_critic_agent",
     "create_response_agent",
     "create_orchestrator",
-    "create_deep_orchestrator",
     "create_deep_orchestrator_instance",
     "create_langgraph_workflow",
 ]

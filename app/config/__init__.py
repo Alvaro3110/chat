@@ -1,6 +1,7 @@
 """Configurações dos agentes."""
 
 from app.config.agents import (
+    AMBIGUITY_RESOLVER_AGENT_CONFIG,
     CADASTRO_AGENT_CONFIG,
     CRITIC_AGENT_CONFIG,
     FINANCEIRO_AGENT_CONFIG,
@@ -19,6 +20,7 @@ from app.config.agents import (
 
 __all__ = [
     "AgentConfig",
+    "AMBIGUITY_RESOLVER_AGENT_CONFIG",
     "CADASTRO_AGENT_CONFIG",
     "FINANCEIRO_AGENT_CONFIG",
     "RENTABILIDADE_AGENT_CONFIG",

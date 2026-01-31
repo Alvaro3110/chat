@@ -1,6 +1,6 @@
 """
 Páginas do frontend Streamlit.
-Implementa a tela inicial e interface de chat com suporte a visualizações.
+Implementa fluxo de duas telas: seleção de domínios e chat com desambiguação.
 """
 
 import streamlit as st
@@ -15,8 +15,11 @@ def init_session_state():
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    if "selected_theme" not in st.session_state:
-        st.session_state.selected_theme = None
+    if "active_domains" not in st.session_state:
+        st.session_state.active_domains = []
+
+    if "domains_selected" not in st.session_state:
+        st.session_state.domains_selected = False
 
     if "orchestrator" not in st.session_state:
         st.session_state.orchestrator = None
@@ -101,28 +104,78 @@ def render_chart(chart_data: dict):
         st.bar_chart(df.set_index("Categoria"))
 
 
-def render_home_page():
-    """Renderiza a página inicial de seleção de tema."""
+def render_disambiguation_card(ambiguity_result: dict):
+    """
+    Renderiza o card de desambiguação de forma elegante e não intrusiva.
+
+    Args:
+        ambiguity_result: Resultado da desambiguação do AmbiguityResolverAgent
+    """
+    if not ambiguity_result:
+        return
+
+    original = ambiguity_result.get("original_question", "")
+    normalized = ambiguity_result.get("normalized_question", "")
+    ambiguities = ambiguity_result.get("ambiguities_detected", [])
+    inferred_period = ambiguity_result.get("inferred_period")
+    inferred_domains = ambiguity_result.get("inferred_domains", [])
+
+    if original == normalized and not ambiguities:
+        return
+
+    with st.expander("Interpretação da Pergunta", expanded=False):
+        st.markdown("---")
+
+        if ambiguities:
+            for amb in ambiguities:
+                term = amb.get("term", "")
+                resolution = amb.get("resolution", "")
+                amb_type = amb.get("type", "")
+                if term and resolution:
+                    st.markdown(f"• **{term}** → {resolution}")
+                    if amb_type:
+                        st.caption(f"   Tipo: {amb_type}")
+
+        if inferred_period:
+            st.markdown(f"• **período inferido** → {inferred_period}")
+
+        if inferred_domains:
+            domains_str = ", ".join(inferred_domains)
+            st.markdown(f"• **domínios** → {domains_str}")
+
+        st.markdown("---")
+        st.caption(f"Pergunta interpretada: *{normalized}*")
+
+
+def render_domain_selection_page():
+    """
+    Tela 1 - Seleção de Informações/Domínios.
+    O usuário DEVE selecionar pelo menos um domínio antes de acessar o chat.
+    """
     st.title("Plataforma Multiagente de IA")
     st.markdown("---")
 
     st.markdown("""
-    ### Bem-vindo à Plataforma de Análise de Dados
+    ### Seleção de Domínios de Dados
 
-    Esta plataforma utiliza múltiplos agentes de IA especializados para responder
-    suas perguntas sobre diferentes domínios de dados.
+    Antes de iniciar o chat, selecione os domínios de dados que deseja consultar.
+    Isso permite que os agentes especializados sejam acionados de forma otimizada.
 
-    **Recursos:**
-    - Agentes especializados por domínio (Cadastro, Financeiro, Rentabilidade)
-    - Orquestração inteligente com LangGraph e DeepAgents
-    - Sugestões automáticas de visualização de dados
-    - Rastreabilidade completa das consultas
-
-    **Selecione um tema abaixo para começar:**
+    **Recursos da plataforma:**
+    - Desambiguação automática de perguntas
+    - Agentes especializados por domínio
+    - Orquestração inteligente com LangGraph
+    - Sugestões de visualização de dados
+    - Rastreabilidade completa
     """)
+
+    st.markdown("---")
+    st.markdown("### Selecione os domínios disponíveis:")
 
     themes = get_available_themes()
     descriptions = get_theme_descriptions()
+
+    selected_domains = []
 
     cols = st.columns(len(themes))
 
@@ -131,51 +184,73 @@ def render_home_page():
             st.markdown(f"#### {theme.capitalize()}")
             st.markdown(descriptions.get(theme, ""))
 
-            if st.button(
-                f"Acessar {theme.capitalize()}",
-                key=f"btn_{theme}",
-                use_container_width=True,
-            ):
-                st.session_state.selected_theme = theme
-                governance = get_governance_manager()
-                st.session_state.session_context = governance.create_session()
-                st.session_state.orchestrator = create_deep_orchestrator_instance(
-                    st.session_state.session_context
-                )
-                st.session_state.messages = []
-                st.rerun()
+            is_selected = st.checkbox(
+                f"Incluir {theme.capitalize()}",
+                key=f"domain_{theme}",
+                value=theme in st.session_state.active_domains,
+            )
+
+            if is_selected:
+                selected_domains.append(theme)
 
     st.markdown("---")
 
-    st.markdown("""
-    ### Modo Híbrido
+    col1, col2 = st.columns([3, 1])
 
-    Para perguntas que envolvem múltiplos domínios de dados, use o modo híbrido
-    que aciona automaticamente os agentes necessários.
-    """)
+    with col1:
+        if selected_domains:
+            domains_text = ", ".join([d.capitalize() for d in selected_domains])
+            st.success(f"Domínios selecionados: **{domains_text}**")
+        else:
+            st.warning("Selecione pelo menos um domínio para continuar.")
 
-    if st.button("Acessar Modo Híbrido", use_container_width=True):
-        st.session_state.selected_theme = "hybrid"
-        governance = get_governance_manager()
-        st.session_state.session_context = governance.create_session()
-        st.session_state.orchestrator = create_deep_orchestrator_instance(
-            st.session_state.session_context
-        )
-        st.session_state.messages = []
-        st.rerun()
+    with col2:
+        continue_disabled = len(selected_domains) == 0
+
+        if st.button(
+            "Continuar para o Chat",
+            use_container_width=True,
+            disabled=continue_disabled,
+            type="primary",
+        ):
+            st.session_state.active_domains = selected_domains
+            st.session_state.domains_selected = True
+
+            governance = get_governance_manager()
+            st.session_state.session_context = governance.create_session()
+            st.session_state.orchestrator = create_deep_orchestrator_instance(
+                st.session_state.session_context
+            )
+            st.session_state.messages = []
+            st.rerun()
+
+    st.markdown("---")
+
+    with st.expander("Sobre os domínios", expanded=False):
+        st.markdown("""
+        **Cadastro**: Informações cadastrais de clientes, incluindo dados pessoais,
+        endereços, contatos e histórico de cadastro.
+
+        **Financeiro**: Dados financeiros como transações, saldos, pagamentos
+        e histórico financeiro.
+
+        **Rentabilidade**: Métricas de rentabilidade, análises de lucro, margens,
+        ROI e indicadores de desempenho.
+        """)
 
 
 def render_chat_page():
-    """Renderiza a página de chat."""
-    theme = st.session_state.selected_theme
+    """
+    Tela 2 - Interface de Chat com IA.
+    Exibe respostas, plano, subagentes e processo de desambiguação.
+    """
+    active_domains = st.session_state.active_domains
 
     with st.sidebar:
         st.title("Configurações")
 
-        if theme == "hybrid":
-            st.info("Modo Híbrido: Múltiplos agentes serão acionados conforme necessário.")
-        else:
-            st.info(f"Tema atual: **{theme.capitalize()}**")
+        domains_text = ", ".join([d.capitalize() for d in active_domains])
+        st.info(f"**Domínios ativos:** {domains_text}")
 
         st.markdown("---")
 
@@ -186,8 +261,8 @@ def render_chat_page():
 
         st.markdown("---")
 
-        if st.button("Voltar ao Início", use_container_width=True):
-            st.session_state.selected_theme = None
+        if st.button("Alterar Domínios", use_container_width=True):
+            st.session_state.domains_selected = False
             st.session_state.messages = []
             st.session_state.orchestrator = None
             st.session_state.pending_visualization = None
@@ -205,23 +280,25 @@ def render_chat_page():
         st.markdown("- DeepAgents")
         st.markdown("- Databricks")
 
-    if theme == "hybrid":
-        st.title("Chat - Modo Híbrido")
-    else:
-        st.title(f"Chat - {theme.capitalize()}")
+    st.title("Chat - Análise de Dados")
+    st.caption(f"Consultando: {domains_text}")
 
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
             if message["role"] == "assistant" and st.session_state.show_details:
-                if "plan" in message:
+                if "ambiguity_result" in message and message["ambiguity_result"]:
+                    render_disambiguation_card(message["ambiguity_result"])
+
+                if "plan" in message and message["plan"]:
                     with st.expander("Plano de Execução"):
                         for step in message["plan"]:
-                            status_icon = "✓" if step.get("status") == "completed" else "○"
-                            st.markdown(f"{status_icon} **{step['agent']}**: {step['task']}")
+                            if step.get("agent") != "VisualizationAgent":
+                                status_icon = "○"
+                                st.markdown(f"{status_icon} **{step.get('agent', 'Agent')}**: {step.get('task', '')}")
 
-                if "sources" in message:
+                if "sources" in message and message["sources"]:
                     with st.expander("Fontes Consultadas"):
                         for source in message["sources"]:
                             st.markdown(f"- {source}")
@@ -264,7 +341,11 @@ def render_chat_page():
                 try:
                     orchestrator = st.session_state.orchestrator
 
-                    result = orchestrator.process_query(prompt, theme)
+                    result = orchestrator.process_query(prompt, active_domains)
+
+                    ambiguity_result = result.get("ambiguity_result", {})
+                    if ambiguity_result and st.session_state.show_details:
+                        render_disambiguation_card(ambiguity_result)
 
                     response_text = result.get("response", "Não foi possível processar a pergunta.")
                     st.markdown(response_text)
@@ -272,17 +353,19 @@ def render_chat_page():
                     message_data = {
                         "role": "assistant",
                         "content": response_text,
+                        "ambiguity_result": ambiguity_result,
                     }
 
-                    if "plan" in result:
+                    if "plan" in result and result["plan"]:
                         message_data["plan"] = result["plan"]
                         if st.session_state.show_details:
                             with st.expander("Plano de Execução"):
                                 for step in result["plan"]:
-                                    status_icon = "✓" if step.get("status") == "completed" else "○"
-                                    st.markdown(f"{status_icon} **{step['agent']}**: {step['task']}")
+                                    if step.get("agent") != "VisualizationAgent":
+                                        status_icon = "○"
+                                        st.markdown(f"{status_icon} **{step.get('agent', 'Agent')}**: {step.get('task', '')}")
 
-                    if "sources" in result:
+                    if "sources" in result and result["sources"]:
                         message_data["sources"] = result["sources"]
                         if st.session_state.show_details:
                             with st.expander("Fontes Consultadas"):
@@ -323,10 +406,13 @@ def render_chat_page():
 
 
 def render_page():
-    """Renderiza a página apropriada baseada no estado."""
+    """
+    Renderiza a página apropriada baseada no estado.
+    Tela 1 (seleção) é OBRIGATÓRIA antes da Tela 2 (chat).
+    """
     init_session_state()
 
-    if st.session_state.selected_theme is None:
-        render_home_page()
+    if not st.session_state.domains_selected:
+        render_domain_selection_page()
     else:
         render_chat_page()
