@@ -78,6 +78,15 @@ def init_session_state():
     if "available_groups" not in st.session_state:
         st.session_state.available_groups = SAMPLE_GROUPS
 
+    if "memory_status" not in st.session_state:
+        st.session_state.memory_status = {
+            "contexto_carregado": False,
+            "memoria_consultada": False,
+            "raio_x_validado": False,
+            "ambiguidade_resolvida": False,
+            "resposta_entregue": False,
+        }
+
 
 def render_login_page():
     """
@@ -257,10 +266,20 @@ def render_group_selection_page():
 
                 governance = get_governance_manager()
                 st.session_state.session_context = governance.create_session()
+
+                user_id = st.session_state.user.get("matricula", "") if st.session_state.user else ""
                 st.session_state.orchestrator = create_deep_orchestrator_instance(
-                    st.session_state.session_context
+                    st.session_state.session_context,
+                    user_id=user_id,
                 )
                 st.session_state.chat_history = []
+                st.session_state.memory_status = {
+                    "contexto_carregado": False,
+                    "memoria_consultada": False,
+                    "raio_x_validado": False,
+                    "ambiguidade_resolvida": False,
+                    "resposta_entregue": False,
+                }
                 st.rerun()
 
     with st.sidebar:
@@ -485,6 +504,21 @@ def render_chat_page():
         st.markdown("- DeepAgents")
         st.markdown("- Databricks")
 
+        st.markdown("---")
+        st.markdown("**Status da Memória:**")
+        memory_status = st.session_state.get("memory_status", {})
+        status_items = [
+            ("contexto_carregado", "Contexto carregado"),
+            ("memoria_consultada", "Memória consultada"),
+            ("raio_x_validado", "Raio X validado"),
+            ("ambiguidade_resolvida", "Ambiguidade resolvida"),
+            ("resposta_entregue", "Resposta entregue"),
+        ]
+        for key, label in status_items:
+            status = memory_status.get(key, False)
+            icon = "+" if status else "-"
+            st.markdown(f"{icon} {label}")
+
     st.markdown("---")
 
     st.markdown(
@@ -620,6 +654,11 @@ def render_chat_page():
                                 "suggestion": viz_suggestion,
                                 "chart_data": viz_data,
                             }
+
+                    memory_status = result.get("memory_status", {})
+                    if memory_status:
+                        st.session_state.memory_status = memory_status
+                        message_data["memory_status"] = memory_status
 
                     st.session_state.chat_history.append(message_data)
 
