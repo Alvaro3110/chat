@@ -87,6 +87,12 @@ def init_session_state():
             "resposta_entregue": False,
         }
 
+    if "selected_model" not in st.session_state:
+        st.session_state.selected_model = "gpt-4o-mini"
+
+    if "selected_provider" not in st.session_state:
+        st.session_state.selected_provider = "openai"
+
 
 def render_login_page():
     """
@@ -157,7 +163,7 @@ def render_login_page():
 def render_group_selection_page():
     """
     Tela 2 - Seleção de Grupos.
-    Exibe grupos disponíveis para seleção.
+    Exibe grupos disponíveis para seleção e configuração do modelo de IA.
     Apenas exibe dados, sem classificação ou inferência.
     """
     st.title("Seleção de Grupo Econômico")
@@ -170,6 +176,66 @@ def render_group_selection_page():
         """,
         unsafe_allow_html=True,
     )
+
+    st.markdown("---")
+
+    st.markdown("### Configuração do Modelo de IA")
+
+    from app.config.llm import (
+        AVAILABLE_MODELS,
+        LLMProvider,
+        check_api_key_available,
+        get_models_by_provider,
+    )
+
+    providers = [
+        ("OpenAI", LLMProvider.OPENAI),
+        ("Google Gemini", LLMProvider.GOOGLE),
+        ("Databricks", LLMProvider.DATABRICKS),
+    ]
+
+    available_providers = []
+    for name, provider in providers:
+        if check_api_key_available(provider):
+            available_providers.append((name, provider))
+
+    if not available_providers:
+        st.warning(
+            "Nenhuma API key configurada. Configure OPENAI_API_KEY, GOOGLE_API_KEY "
+            "ou DATABRICKS_TOKEN/DATABRICKS_HOST no arquivo .env"
+        )
+        available_providers = [("OpenAI (não configurado)", LLMProvider.OPENAI)]
+
+    provider_names = [p[0] for p in available_providers]
+    selected_provider_idx = st.selectbox(
+        "Provedor de IA",
+        options=range(len(provider_names)),
+        format_func=lambda i: provider_names[i],
+        key="provider_selector",
+    )
+
+    selected_provider = available_providers[selected_provider_idx][1]
+    st.session_state.selected_provider = selected_provider.value
+
+    provider_models = get_models_by_provider(selected_provider)
+
+    if provider_models:
+        model_options = [
+            (model_id, AVAILABLE_MODELS[model_id].display_name)
+            for model_id in provider_models
+        ]
+
+        selected_model_idx = st.selectbox(
+            "Modelo",
+            options=range(len(model_options)),
+            format_func=lambda i: f"{model_options[i][1]} ({model_options[i][0]})",
+            key="model_selector",
+        )
+
+        st.session_state.selected_model = model_options[selected_model_idx][0]
+
+        model_config = AVAILABLE_MODELS[st.session_state.selected_model]
+        st.caption(f"_{model_config.description}_")
 
     st.markdown("---")
 
@@ -268,9 +334,11 @@ def render_group_selection_page():
                 st.session_state.session_context = governance.create_session()
 
                 user_id = st.session_state.user.get("matricula", "") if st.session_state.user else ""
+                model_id = st.session_state.get("selected_model", "gpt-4o-mini")
                 st.session_state.orchestrator = create_deep_orchestrator_instance(
                     st.session_state.session_context,
                     user_id=user_id,
+                    model_id=model_id,
                 )
                 st.session_state.chat_history = []
                 st.session_state.memory_status = {

@@ -77,6 +77,7 @@ def parse_json_response(content: str) -> dict[str, Any] | None:
 def create_langgraph_workflow(
     session: SessionContext | None = None,
     user_id: str | None = None,
+    model_id: str | None = None,
 ) -> StateGraph:
     """
     Cria o workflow usando LangGraph com fluxo de desambiguação e memória.
@@ -87,13 +88,20 @@ def create_langgraph_workflow(
     Args:
         session: Contexto da sessão
         user_id: Matrícula do usuário para memória
+        model_id: ID do modelo LLM a ser usado
 
     Returns:
         Grafo compilado
     """
-    from langchain_openai import ChatOpenAI
+    from app.config.llm import create_llm
 
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    try:
+        llm = create_llm(model_id=model_id, temperature=0)
+        logger.info(f"Using LLM model: {model_id or 'default'}")
+    except ValueError as e:
+        logger.warning(f"Failed to create LLM with model {model_id}: {e}. Falling back to OpenAI.")
+        from langchain_openai import ChatOpenAI
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
     memory_agent: MemoryAgent | None = None
     if user_id:
@@ -534,10 +542,12 @@ class DeepAgentOrchestrator:
         self,
         session: SessionContext | None = None,
         user_id: str | None = None,
+        model_id: str | None = None,
     ):
         self.session = session
         self.user_id = user_id
-        self.agent = create_langgraph_workflow(session, user_id)
+        self.model_id = model_id
+        self.agent = create_langgraph_workflow(session, user_id, model_id)
 
     def process_query(
         self,
@@ -619,6 +629,7 @@ class DeepAgentOrchestrator:
 def create_deep_orchestrator_instance(
     session: SessionContext | None = None,
     user_id: str | None = None,
+    model_id: str | None = None,
 ) -> DeepAgentOrchestrator:
-    """Factory function para criar o orquestrador com suporte a memória."""
-    return DeepAgentOrchestrator(session=session, user_id=user_id)
+    """Factory function para criar o orquestrador com suporte a memória e modelo configurável."""
+    return DeepAgentOrchestrator(session=session, user_id=user_id, model_id=model_id)
