@@ -84,8 +84,8 @@ AVAILABLE_MODELS: dict[str, LLMConfig] = {
     ),
     "databricks-llama-3-70b": LLMConfig(
         provider=LLMProvider.DATABRICKS,
-        model_id="databricks-meta-llama-3-70b-instruct",
-        display_name="Llama 3 70B",
+        model_id="databricks-gpt-oss-120b",
+        display_name="GPT-OSS 120B",
         description="Meta Llama 3 70B via Databricks",
         env_key="DATABRICKS_TOKEN",
     ),

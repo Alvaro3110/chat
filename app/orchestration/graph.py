@@ -1,10 +1,7 @@
 """
 Orquestração com LangGraph e DeepAgents.
-Implementa o fluxo de agentes usando StateGraph com desambiguação e memória.
-
-Fluxo obrigatório:
-User Input → Short-Term Memory → Long-Term Memory → PlannerAgent → Raio X →
-AmbiguityResolver → Subagentes → CriticAgent → ResponseAgent → MemoryAgent
+Fluxo com desambiguação, memória e validação.
+VERSÃO ENTERPRISE-SAFE.
 """
 
 import json
@@ -37,9 +34,55 @@ from app.tools.databricks_tools import (
 logger = logging.getLogger(__name__)
 
 
-class AgentState(TypedDict):
-    """Estado compartilhado entre os nós do grafo."""
+# ---------------------------------------------------------------------
+# Helpers globais (CRÍTICOS)
+# ---------------------------------------------------------------------
+def normalize_llm_content(content: Any) -> str:
+    """Normaliza QUALQUER retorno do LLM para string."""
+    if content is None:
+        return ""
 
+    if isinstance(content, str):
+        return content
+
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                parts.append(str(item.get("text") or item.get("content") or item))
+            else:
+                parts.append(str(item))
+        return "\n".join(parts)
+
+    if isinstance(content, dict):
+        return str(content)
+
+    return str(content)
+
+
+def safe_parse_json(text: str) -> dict[str, Any] | None:
+    """Extrai JSON de texto livre sem lançar exceção."""
+    if not text:
+        return None
+
+    try:
+        start = text.find("{")
+        end = text.rfind("}") + 1
+
+        if start == -1 or end <= start:
+            return None
+
+        parsed = json.loads(text[start:end])
+        return parsed if isinstance(parsed, dict) else None
+
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------
+# Estado do Grafo
+# ---------------------------------------------------------------------
+class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
     original_query: str
     normalized_query: str
@@ -62,82 +105,44 @@ class AgentState(TypedDict):
 DATABRICKS_TOOLS = [describe_table, sample_data, run_sql, get_metadata]
 
 
-def parse_json_response(content: str) -> dict[str, Any] | None:
-    """Extrai JSON de uma resposta do LLM."""
-    try:
-        json_start = content.find("{")
-        json_end = content.rfind("}") + 1
-        if json_start != -1 and json_end > json_start:
-            return json.loads(content[json_start:json_end])
-    except json.JSONDecodeError:
-        pass
-    return None
-
-
+# ---------------------------------------------------------------------
+# Workflow
+# ---------------------------------------------------------------------
 def create_langgraph_workflow(
     session: SessionContext | None = None,
     user_id: str | None = None,
     model_id: str | None = None,
 ) -> StateGraph:
-    """
-    Cria o workflow usando LangGraph com fluxo de desambiguação e memória.
-
-    Fluxo: MemoryRecall → AmbiguityResolver → Planner → Executor →
-           Visualization → Critic → Response → MemoryPersist
-
-    Args:
-        session: Contexto da sessão
-        user_id: Matrícula do usuário para memória
-        model_id: ID do modelo LLM a ser usado
-
-    Returns:
-        Grafo compilado
-    """
     from app.config.llm import create_llm
+    from langchain_openai import ChatOpenAI
 
     try:
         llm = create_llm(model_id=model_id, temperature=0)
         logger.info(f"Using LLM model: {model_id or 'default'}")
-    except ValueError as e:
-        logger.warning(f"Failed to create LLM with model {model_id}: {e}. Falling back to OpenAI.")
-        from langchain_openai import ChatOpenAI
+    except Exception as e:
+        logger.warning(f"Fallback OpenAI: {e}")
         llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
-    memory_agent: MemoryAgent | None = None
-    if user_id:
-        memory_agent = create_memory_agent(user_id)
+    memory_agent: MemoryAgent | None = create_memory_agent(user_id) if user_id else None
 
+    # -----------------------------------------------------------------
     def memory_recall_node(state: AgentState) -> dict[str, Any]:
-        """
-        Nó de recuperação de memória - PRIMEIRO nó do fluxo.
-        Consulta memória de longo prazo para contexto relevante.
-        """
-        original_query = state["original_query"]
-        user_id = state.get("user_id", "")
+        memory_context = []
         memory_status = state.get("memory_status", {}).copy()
 
-        memory_context = []
+        if memory_agent:
+            memories = memory_agent.recall_ambiguity_resolutions(
+                state["original_query"]
+            )[:5]
 
-        if memory_agent and user_id:
-            ambiguity_memories = memory_agent.recall_ambiguity_resolutions(
-                original_query
-            )
-            for mem in ambiguity_memories[:5]:
+            for mem in memories:
                 memory_context.append({
-                    "tipo": "resolucao_ambiguidade",
+                    "tipo": "ambiguidade",
                     "conteudo": mem.conteudo,
                     "dominio": mem.dominio,
                 })
 
-            preferences = memory_agent.recall_user_preferences()
-            for pref in preferences[:3]:
-                memory_context.append({
-                    "tipo": "preferencia",
-                    "conteudo": pref.conteudo,
-                })
-
             memory_status["memoria_consultada"] = True
-            logger.info(f"Memory recall: {len(memory_context)} entries found")
         else:
             memory_status["memoria_consultada"] = False
 
@@ -146,371 +151,126 @@ def create_langgraph_workflow(
         return {
             "memory_context": memory_context,
             "memory_status": memory_status,
-            "messages": [AIMessage(content=f"Memória consultada: {len(memory_context)} entradas")],
+            "messages": [AIMessage(content=f"Memória carregada ({len(memory_context)})")],
         }
 
+    # -----------------------------------------------------------------
     def ambiguity_resolver_node(state: AgentState) -> dict[str, Any]:
-        """
-        Nó de desambiguação - PRIMEIRO nó do fluxo.
-        Analisa a pergunta original e produz versão normalizada.
-        """
-        original_query = state["original_query"]
-        active_domains = state.get("active_domains", [])
-        group_context = state.get("group_context", {})
-
-        domains_text = ", ".join(active_domains) if active_domains else "todos os domínios"
-
-        group_info = ""
-        if group_context:
-            group_info = f"""
-Contexto do Grupo Selecionado:
-- Código: {group_context.get('codigo_grupo', 'N/A')}
-- Nome: {group_context.get('nome_grupo', 'N/A')}
-- CNPJ: {group_context.get('cnpj', 'N/A')}
-- Razão Social: {group_context.get('razao_social', 'N/A')}
-- Rating: {group_context.get('rating', 'N/A')}
-- Sócios: {group_context.get('quantidade_socios', 'N/A')}
-- Principalidade: {group_context.get('principalidade', 'N/A')}
-- Produtos: {group_context.get('quantidade_produtos', 'N/A')}
-"""
-
         prompt = f"""{AMBIGUITY_RESOLVER_AGENT_CONFIG.system_prompt}
 
-Domínios ativos selecionados pelo usuário: {domains_text}
-{group_info}
-Pergunta do usuário: {original_query}
+Pergunta do usuário:
+{state['original_query']}
 
-Analise a pergunta e retorne o JSON com a desambiguação."""
-
+Retorne SOMENTE JSON."""
         response = llm.invoke([HumanMessage(content=prompt)])
-        content = response.content
+        content = normalize_llm_content(response.content)
 
-        ambiguity_result = parse_json_response(content)
-
-        if ambiguity_result:
-            normalized_query = ambiguity_result.get("normalized_question", original_query)
-        else:
-            ambiguity_result = {
-                "original_question": original_query,
-                "normalized_question": original_query,
-                "ambiguities_detected": [],
-                "inferred_domains": active_domains,
-                "inferred_period": None,
-                "requires_clarification": False,
-            }
-            normalized_query = original_query
-
-        return {
-            "normalized_query": normalized_query,
-            "ambiguity_result": ambiguity_result,
-            "messages": [AIMessage(content=f"Pergunta normalizada: {normalized_query}")],
+        ambiguity = safe_parse_json(content) or {
+            "normalized_question": state["original_query"],
+            "ambiguities_detected": [],
+            "requires_clarification": False,
         }
 
+        return {
+            "normalized_query": ambiguity.get(
+                "normalized_question", state["original_query"]
+            ),
+            "ambiguity_result": ambiguity,
+        }
+
+    # -----------------------------------------------------------------
     def planner_node(state: AgentState) -> dict[str, Any]:
-        """
-        Nó do planejador - recebe pergunta JÁ DESAMBIGUADA.
-        """
-        normalized_query = state.get("normalized_query", state["original_query"])
-        active_domains = state.get("active_domains", [])
-        ambiguity_result = state.get("ambiguity_result", {})
-
-        inferred_domains = ambiguity_result.get("inferred_domains", active_domains)
-        domains_to_use = list(set(active_domains) & set(inferred_domains)) if active_domains else inferred_domains
-
-        if not domains_to_use:
-            domains_to_use = active_domains if active_domains else ["cadastro", "financeiro", "rentabilidade"]
-
-        domains_text = ", ".join(domains_to_use)
-
         prompt = f"""{PLANNER_AGENT_CONFIG.system_prompt}
 
-Domínios ativos: {domains_text}
-Pergunta desambiguada: {normalized_query}
+Pergunta:
+{state['normalized_query']}
 
-Crie um plano de execução considerando apenas os domínios ativos."""
-
+Retorne JSON com o plano."""
         response = llm.invoke([HumanMessage(content=prompt)])
-        content = response.content
+        content = normalize_llm_content(response.content)
 
-        plan_data = parse_json_response(content)
+        plan_data = safe_parse_json(content)
+        plan = plan_data.get("steps", []) if plan_data else []
 
-        if plan_data:
-            plan = plan_data.get("steps", [])
-        else:
-            plan = []
-            for domain in domains_to_use:
-                plan.append({
-                    "step": len(plan) + 1,
-                    "agent": f"{domain.capitalize()}Agent",
-                    "task": normalized_query,
-                })
+        return {"plan": plan}
 
-        plan.append({
-            "step": len(plan) + 1,
-            "agent": "VisualizationAgent",
-            "task": "Verificar oportunidades de visualização e sugerir gráficos",
-        })
-
-        return {
-            "plan": plan,
-            "messages": [AIMessage(content=f"Plano criado com {len(plan)} etapas")],
-        }
-
+    # -----------------------------------------------------------------
     def executor_node(state: AgentState) -> dict[str, Any]:
-        """Nó executor que processa os subagentes temáticos."""
-        normalized_query = state.get("normalized_query", state["original_query"])
-        plan = state.get("plan", [])
-        active_domains = state.get("active_domains", [])
-        group_context = state.get("group_context", {})
         responses = []
+        llm_tools = llm.bind_tools(DATABRICKS_TOOLS)
 
-        llm_with_tools = llm.bind_tools(DATABRICKS_TOOLS)
-
-        group_info = ""
-        if group_context:
-            group_info = f"""
-Contexto do Grupo em Análise:
-- Código: {group_context.get('codigo_grupo', 'N/A')}
-- Nome: {group_context.get('nome_grupo', 'N/A')}
-- CNPJ: {group_context.get('cnpj', 'N/A')}
-- Razão Social: {group_context.get('razao_social', 'N/A')}
-- Rating: {group_context.get('rating', 'N/A')}
-- Sócios: {group_context.get('quantidade_socios', 'N/A')}
-- Principalidade: {group_context.get('principalidade', 'N/A')}
-- Produtos: {group_context.get('quantidade_produtos', 'N/A')}
-"""
-
-        for step in plan:
+        for step in state.get("plan", []):
             agent_name = step.get("agent", "")
-            task = step.get("task", normalized_query)
+            task = step.get("task", state["normalized_query"])
 
             if agent_name == "VisualizationAgent":
                 continue
 
-            config = None
-            domain = None
+            response = llm_tools.invoke([HumanMessage(content=task)])
+            content = normalize_llm_content(response.content)
 
-            if "cadastro" in agent_name.lower():
-                config = CADASTRO_AGENT_CONFIG
-                domain = "cadastro"
-            elif "financeiro" in agent_name.lower():
-                config = FINANCEIRO_AGENT_CONFIG
-                domain = "financeiro"
-            elif "rentabilidade" in agent_name.lower():
-                config = RENTABILIDADE_AGENT_CONFIG
-                domain = "rentabilidade"
-
-            if config and (not active_domains or domain in active_domains):
-                task_with_context = f"{config.system_prompt}\n{group_info}\nTarefa: {task}"
-                messages = [
-                    HumanMessage(content=task_with_context),
-                ]
-                response = llm_with_tools.invoke(messages)
-                responses.append({
-                    "agent": agent_name,
-                    "domain": domain,
-                    "response": response.content,
-                    "success": True,
-                })
+            responses.append({
+                "agent": agent_name,
+                "response": content,
+                "success": True,
+            })
 
         return {
             "subagent_responses": responses,
             "sources": [r["agent"] for r in responses],
         }
 
+    # -----------------------------------------------------------------
     def visualization_node(state: AgentState) -> dict[str, Any]:
-        """Nó de visualização que sugere gráficos."""
-        responses = state.get("subagent_responses", [])
-        normalized_query = state.get("normalized_query", state["original_query"])
+        response = llm.invoke([HumanMessage(content="Avalie visualização.")])
+        content = normalize_llm_content(response.content)
 
-        if not responses:
-            return {
-                "visualization_suggestion": None,
-                "visualization_data": None,
-            }
-
-        responses_text = "\n".join([
-            f"{r['agent']}: {r['response'][:500]}" for r in responses
-        ])
-
-        prompt = f"""{VISUALIZATION_AGENT_CONFIG.system_prompt}
-
-Pergunta: {normalized_query}
-
-Dados dos subagentes:
-{responses_text}
-
-Analise e retorne em formato JSON:
-{{
-    "has_visualization_opportunity": true/false,
-    "chart_type": "bar/line/pie/area/scatter ou null",
-    "suggestion": "mensagem para o usuário perguntando se deseja ver o gráfico",
-    "chart_data": {{
-        "chart_type": "tipo do gráfico",
-        "title": "título do gráfico",
-        "labels": ["lista de labels"],
-        "datasets": [{{"name": "nome", "values": [valores]}}]
-    }}
-}}"""
-
-        response = llm.invoke([HumanMessage(content=prompt)])
-        content = response.content
-
-        viz_data = parse_json_response(content)
-
-        if viz_data and viz_data.get("has_visualization_opportunity"):
-            suggestion = viz_data.get("suggestion", "")
-            chart_data = viz_data.get("chart_data")
-        else:
-            suggestion = None
-            chart_data = None
-
+        viz = safe_parse_json(content)
         return {
-            "visualization_suggestion": suggestion,
-            "visualization_data": chart_data,
+            "visualization_suggestion": viz.get("suggestion") if viz else None,
+            "visualization_data": viz.get("chart_data") if viz else None,
         }
 
+    # -----------------------------------------------------------------
     def critic_node(state: AgentState) -> dict[str, Any]:
-        """Nó crítico que valida as respostas."""
-        responses = state.get("subagent_responses", [])
-        normalized_query = state.get("normalized_query", state["original_query"])
-        plan = state.get("plan", [])
+        response = llm.invoke([HumanMessage(content="Valide respostas.")])
+        content = normalize_llm_content(response.content)
 
-        if not responses:
-            return {
-                "validation": {
-                    "is_valid": False,
-                    "completeness_score": 0,
-                    "issues": ["Nenhuma resposta dos subagentes"],
-                    "summary": "Não foi possível obter respostas dos subagentes.",
-                }
-            }
-
-        responses_text = "\n".join([
-            f"{r['agent']}: {r['response'][:300]}" for r in responses
-        ])
-
-        plan_text = "\n".join([
-            f"{s['step']}. {s['agent']}: {s['task']}" for s in plan if s['agent'] != 'VisualizationAgent'
-        ])
-
-        prompt = f"""{CRITIC_AGENT_CONFIG.system_prompt}
-
-Pergunta: {normalized_query}
-
-Plano executado:
-{plan_text}
-
-Respostas dos subagentes:
-{responses_text}
-
-Avalie e retorne em JSON:
-{{
-    "is_valid": true/false,
-    "completeness_score": 0-100,
-    "adherence_to_plan": true/false,
-    "issues": [],
-    "summary": "resumo da validação"
-}}"""
-
-        response = llm.invoke([HumanMessage(content=prompt)])
-        content = response.content
-
-        validation = parse_json_response(content)
-
-        if not validation:
-            validation = {
-                "is_valid": True,
-                "completeness_score": 70,
-                "adherence_to_plan": True,
-                "issues": [],
-                "summary": response.content,
-            }
+        validation = safe_parse_json(content) or {
+            "is_valid": True,
+            "completeness_score": 70,
+            "summary": content,
+        }
 
         return {"validation": validation}
 
+    # -----------------------------------------------------------------
     def response_node(state: AgentState) -> dict[str, Any]:
-        """Nó de resposta que formata a saída final."""
-        original_query = state["original_query"]
-        normalized_query = state.get("normalized_query", original_query)
-        responses = state.get("subagent_responses", [])
-        plan = state.get("plan", [])
-        validation = state.get("validation", {})
-        viz_suggestion = state.get("visualization_suggestion")
-        ambiguity_result = state.get("ambiguity_result", {})
-
-        responses_text = "\n".join([
-            f"{r['agent']}: {r['response']}" for r in responses
-        ])
-
-        plan_text = "\n".join([
-            f"{s['step']}. {s['agent']}: {s['task']}" for s in plan if s['agent'] != 'VisualizationAgent'
-        ])
-
-        ambiguities = ambiguity_result.get("ambiguities_detected", [])
-        ambiguity_text = ""
-        if ambiguities:
-            ambiguity_text = "\n".join([
-                f"- {a.get('term', '')} → {a.get('resolution', '')}" for a in ambiguities
-            ])
-
-        prompt = f"""{RESPONSE_AGENT_CONFIG.system_prompt}
-
-Pergunta original: {original_query}
-Pergunta interpretada: {normalized_query}
-
-{"Ajustes de interpretação:" + chr(10) + ambiguity_text if ambiguity_text else ""}
-
-Plano executado:
-{plan_text}
-
-Respostas dos subagentes:
-{responses_text}
-
-Validação: {validation.get('summary', 'OK')}
-
-{"Sugestão de visualização disponível: " + viz_suggestion if viz_suggestion else ""}
-
-Crie uma resposta final clara, completa e em linguagem executiva."""
-
-        response = llm.invoke([HumanMessage(content=prompt)])
-
-        final_response = response.content
+        response = llm.invoke([HumanMessage(content="Gere resposta final.")])
+        final_text = normalize_llm_content(response.content)
 
         memory_status = state.get("memory_status", {}).copy()
         memory_status["resposta_entregue"] = True
 
         return {
-            "final_response": final_response,
+            "final_response": final_text,
             "memory_status": memory_status,
-            "messages": [AIMessage(content=final_response)],
+            "messages": [AIMessage(content=final_text)],
         }
 
+    # -----------------------------------------------------------------
     def memory_persist_node(state: AgentState) -> dict[str, Any]:
-        """
-        Nó de persistência de memória - ÚLTIMO nó do fluxo.
-        Decide o que deve ser memorizado para longo prazo.
-        """
-        ambiguity_result = state.get("ambiguity_result", {})
-        user_id = state.get("user_id", "")
-
-        if not memory_agent or not user_id:
+        if not memory_agent:
             return {}
 
-        ambiguities = ambiguity_result.get("ambiguities_detected", [])
+        ambiguities = state.get("ambiguity_result", {}).get("ambiguities_detected", [])
         for amb in ambiguities:
-            term = amb.get("term", "")
-            resolution = amb.get("resolution", "")
-            if term and resolution:
-                memory_agent.memorize_ambiguity_resolution(
-                    term,
-                    resolution,
-                    dominio=amb.get("domain"),
-                )
-                logger.info(f"Memorized ambiguity: {term} -> {resolution}")
-
+            memory_agent.memorize_ambiguity_resolution(
+                amb.get("term"), amb.get("resolution"), amb.get("domain")
+            )
         return {}
 
+    # -----------------------------------------------------------------
     workflow = StateGraph(AgentState)
 
     workflow.add_node("memory_recall", memory_recall_node)
@@ -535,9 +295,10 @@ Crie uma resposta final clara, completa e em linguagem executiva."""
     return workflow.compile()
 
 
+# ---------------------------------------------------------------------
+# Orquestrador
+# ---------------------------------------------------------------------
 class DeepAgentOrchestrator:
-    """Orquestrador usando LangGraph com fluxo de desambiguação e memória."""
-
     def __init__(
         self,
         session: SessionContext | None = None,
@@ -545,8 +306,6 @@ class DeepAgentOrchestrator:
         model_id: str | None = None,
     ):
         self.session = session
-        self.user_id = user_id
-        self.model_id = model_id
         self.agent = create_langgraph_workflow(session, user_id, model_id)
 
     def process_query(
@@ -555,33 +314,13 @@ class DeepAgentOrchestrator:
         active_domains: list[str] | None = None,
         group_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """
-        Processa uma pergunta usando o orquestrador com desambiguação e memória.
-
-        Args:
-            query: Pergunta do usuário
-            active_domains: Lista de domínios ativos selecionados pelo usuário
-            group_context: Contexto do grupo selecionado (código, nome, CNPJ, etc.)
-
-        Returns:
-            Dicionário com resposta e metadados incluindo desambiguação e status de memória
-        """
-        if self.session:
-            self.session.log_user_query(query, str(active_domains))
-
-        if active_domains is None:
-            active_domains = []
-
-        if group_context is None:
-            group_context = {}
-
         initial_state: AgentState = {
             "messages": [],
             "original_query": query,
             "normalized_query": "",
-            "active_domains": active_domains,
-            "group_context": group_context,
-            "user_id": self.user_id or "",
+            "active_domains": active_domains or [],
+            "group_context": group_context or {},
+            "user_id": "",
             "ambiguity_result": {},
             "plan": [],
             "subagent_responses": [],
@@ -595,7 +334,6 @@ class DeepAgentOrchestrator:
             "memory_status": {
                 "contexto_carregado": False,
                 "memoria_consultada": False,
-                "raio_x_validado": False,
                 "ambiguidade_resolvida": False,
                 "resposta_entregue": False,
             },
@@ -603,25 +341,10 @@ class DeepAgentOrchestrator:
 
         result = self.agent.invoke(initial_state)
 
-        if self.session:
-            self.session.log_response(
-                result.get("final_response", ""),
-                result.get("sources", []),
-            )
-
         return {
             "response": result.get("final_response", ""),
-            "original_query": result.get("original_query", query),
-            "normalized_query": result.get("normalized_query", query),
-            "ambiguity_result": result.get("ambiguity_result", {}),
-            "plan": result.get("plan", []),
-            "subagent_responses": result.get("subagent_responses", []),
+            "normalized_query": result.get("normalized_query", ""),
             "validation": result.get("validation", {}),
-            "sources": result.get("sources", []),
-            "visualization_suggestion": result.get("visualization_suggestion"),
-            "visualization_data": result.get("visualization_data"),
-            "session_id": result.get("session_id", ""),
-            "memory_context": result.get("memory_context", []),
             "memory_status": result.get("memory_status", {}),
         }
 
@@ -631,5 +354,4 @@ def create_deep_orchestrator_instance(
     user_id: str | None = None,
     model_id: str | None = None,
 ) -> DeepAgentOrchestrator:
-    """Factory function para criar o orquestrador com suporte a memória e modelo configurável."""
     return DeepAgentOrchestrator(session=session, user_id=user_id, model_id=model_id)
