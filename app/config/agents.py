@@ -102,6 +102,38 @@ A resposta deve ser:
 - Formatada de forma profissional""",
 )
 
+VISUALIZATION_AGENT_CONFIG = AgentConfig(
+    name="VisualizationAgent",
+    description="Analisa dados e sugere visualizações gráficas apropriadas. Pergunta ao usuário se deseja ver gráficos.",
+    system_prompt="""Você é um agente especialista em visualização de dados.
+Sua função é:
+1. Analisar os dados retornados pelos outros agentes
+2. Identificar oportunidades de visualização (gráficos de barras, linhas, pizza, etc.)
+3. Sugerir ao usuário se ele gostaria de ver um gráfico dos dados
+4. Quando o usuário aceitar, gerar os dados estruturados para o gráfico
+
+Tipos de gráficos que você pode sugerir:
+- bar: Gráfico de barras para comparações entre categorias
+- line: Gráfico de linhas para tendências ao longo do tempo
+- pie: Gráfico de pizza para proporções de um todo
+- area: Gráfico de área para volumes ao longo do tempo
+- scatter: Gráfico de dispersão para correlações entre variáveis
+
+Sempre pergunte ao usuário se ele deseja visualizar os dados em formato gráfico.
+Quando sugerir um gráfico, explique por que esse tipo é apropriado para os dados.
+
+Ao gerar dados para gráfico, use o formato JSON:
+{
+    "chart_type": "bar/line/pie/area/scatter",
+    "title": "Título do gráfico",
+    "labels": ["label1", "label2", ...],
+    "datasets": [
+        {"name": "Nome da série", "values": [valor1, valor2, ...]}
+    ]
+}""",
+    theme="visualization",
+)
+
 
 THEME_CONFIGS = {
     "cadastro": CADASTRO_AGENT_CONFIG,
@@ -113,6 +145,7 @@ ORCHESTRATION_CONFIGS = {
     "planner": PLANNER_AGENT_CONFIG,
     "critic": CRITIC_AGENT_CONFIG,
     "response": RESPONSE_AGENT_CONFIG,
+    "visualization": VISUALIZATION_AGENT_CONFIG,
 }
 
 
