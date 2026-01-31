@@ -1,25 +1,69 @@
 """
 Páginas do frontend Streamlit.
-Implementa fluxo de duas telas: seleção de domínios e chat com desambiguação.
+Implementa fluxo de três telas: Login → Seleção de Grupos → Chat.
+Frontend apenas coleta contexto e exibe estado - sem lógica de negócio.
 """
 
 import streamlit as st
 
-from app.config.agents import get_available_themes, get_theme_descriptions
+from app.frontend.styles import apply_custom_styles
 from app.governance.logging import get_governance_manager
 from app.orchestration.graph import create_deep_orchestrator_instance
 
+SAMPLE_GROUPS = [
+    {
+        "codigo_grupo": "GRP001",
+        "nome_grupo": "Grupo Alpha Investimentos",
+        "cnpj": "12.345.678/0001-90",
+        "razao_social": "Alpha Investimentos S.A.",
+        "rating": 8.5,
+        "quantidade_socios": 12,
+        "principalidade": "Holding",
+        "quantidade_produtos": 45,
+    },
+    {
+        "codigo_grupo": "GRP002",
+        "nome_grupo": "Grupo Beta Participações",
+        "cnpj": "98.765.432/0001-10",
+        "razao_social": "Beta Participações Ltda.",
+        "rating": 7.2,
+        "quantidade_socios": 8,
+        "principalidade": "Comercial",
+        "quantidade_produtos": 23,
+    },
+    {
+        "codigo_grupo": "GRP003",
+        "nome_grupo": "Grupo Gamma Serviços",
+        "cnpj": "11.222.333/0001-44",
+        "razao_social": "Gamma Serviços e Consultoria S.A.",
+        "rating": 9.1,
+        "quantidade_socios": 5,
+        "principalidade": "Serviços",
+        "quantidade_produtos": 67,
+    },
+    {
+        "codigo_grupo": "GRP004",
+        "nome_grupo": "Grupo Delta Industrial",
+        "cnpj": "55.666.777/0001-88",
+        "razao_social": "Delta Indústria e Comércio Ltda.",
+        "rating": 6.8,
+        "quantidade_socios": 15,
+        "principalidade": "Industrial",
+        "quantidade_produtos": 89,
+    },
+]
+
 
 def init_session_state():
-    """Inicializa o estado da sessão."""
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+    """Inicializa o estado da sessão com todas as variáveis necessárias."""
+    if "user" not in st.session_state:
+        st.session_state.user = None
 
-    if "active_domains" not in st.session_state:
-        st.session_state.active_domains = []
+    if "selected_group" not in st.session_state:
+        st.session_state.selected_group = None
 
-    if "domains_selected" not in st.session_state:
-        st.session_state.domains_selected = False
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
 
     if "orchestrator" not in st.session_state:
         st.session_state.orchestrator = None
@@ -32,6 +76,246 @@ def init_session_state():
 
     if "pending_visualization" not in st.session_state:
         st.session_state.pending_visualization = None
+
+    if "available_groups" not in st.session_state:
+        st.session_state.available_groups = SAMPLE_GROUPS
+
+
+def render_login_page():
+    """
+    Tela 1 - Login.
+    Captura matrícula e senha do usuário.
+    Não executa validação complexa, apenas armazena contexto.
+    """
+    st.markdown(
+        """
+        <div style="display: flex; justify-content: center; align-items: center; min-height: 80vh; flex-direction: column;">
+        """,
+        unsafe_allow_html=True,
+    )
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+
+    with col2:
+        st.markdown(
+            """
+            <div class="login-container">
+                <h1 style="text-align: center; color: #1a365d; margin-bottom: 0.5rem;">
+                    Copiloto de IA
+                </h1>
+                <p style="text-align: center; color: #4a5568; margin-bottom: 2rem;">
+                    Plataforma Multiagente Corporativa
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        with st.form("login_form", clear_on_submit=False):
+            st.markdown("### Acesso ao Sistema")
+
+            matricula = st.text_input(
+                "Matrícula",
+                placeholder="Digite sua matrícula",
+                key="login_matricula",
+            )
+
+            senha = st.text_input(
+                "Senha",
+                type="password",
+                placeholder="Digite sua senha",
+                key="login_senha",
+            )
+
+            submitted = st.form_submit_button(
+                "Entrar",
+                use_container_width=True,
+                type="primary",
+            )
+
+            if submitted:
+                if matricula and senha:
+                    st.session_state.user = {
+                        "matricula": matricula,
+                    }
+                    st.rerun()
+                else:
+                    st.error("Por favor, preencha todos os campos.")
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_group_selection_page():
+    """
+    Tela 2 - Seleção de Grupos.
+    Exibe grupos disponíveis para seleção.
+    Apenas exibe dados, sem classificação ou inferência.
+    """
+    st.title("Seleção de Grupo Econômico")
+
+    st.markdown(
+        f"""
+        <div class="user-info-bar">
+            Usuário: <strong>{st.session_state.user.get('matricula', 'N/A')}</strong>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("---")
+
+    st.markdown("""
+    ### Selecione o grupo que deseja avaliar
+
+    Escolha um dos grupos econômicos disponíveis para iniciar a análise via chat.
+    """)
+
+    groups = st.session_state.available_groups
+
+    selected_index = st.selectbox(
+        "Grupo Econômico",
+        options=range(len(groups)),
+        format_func=lambda i: f"{groups[i]['codigo_grupo']} - {groups[i]['nome_grupo']}",
+        key="group_selector",
+    )
+
+    if selected_index is not None:
+        group = groups[selected_index]
+
+        st.markdown("---")
+        st.markdown("### Informações do Grupo Selecionado")
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            st.markdown(
+                f"""
+                <div class="info-card">
+                    <div class="info-label">Código</div>
+                    <div class="info-value">{group['codigo_grupo']}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        with col2:
+            st.markdown(
+                f"""
+                <div class="info-card">
+                    <div class="info-label">CNPJ</div>
+                    <div class="info-value">{group['cnpj']}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        with col3:
+            st.markdown(
+                f"""
+                <div class="info-card">
+                    <div class="info-label">Rating</div>
+                    <div class="info-value">{group['rating']}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        with col4:
+            st.markdown(
+                f"""
+                <div class="info-card">
+                    <div class="info-label">Produtos</div>
+                    <div class="info-value">{group['quantidade_produtos']}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        st.markdown("---")
+
+        col_btn1, col_btn2 = st.columns([3, 1])
+
+        with col_btn2:
+            if st.button(
+                "Selecionar Grupo",
+                use_container_width=True,
+                type="primary",
+            ):
+                st.session_state.selected_group = {
+                    "codigo_grupo": group["codigo_grupo"],
+                    "nome_grupo": group["nome_grupo"],
+                    "cnpj": group["cnpj"],
+                    "razao_social": group["razao_social"],
+                    "rating": group["rating"],
+                    "quantidade_socios": group["quantidade_socios"],
+                    "principalidade": group["principalidade"],
+                    "quantidade_produtos": group["quantidade_produtos"],
+                }
+
+                governance = get_governance_manager()
+                st.session_state.session_context = governance.create_session()
+                st.session_state.orchestrator = create_deep_orchestrator_instance(
+                    st.session_state.session_context
+                )
+                st.session_state.chat_history = []
+                st.rerun()
+
+    with st.sidebar:
+        st.markdown("### Navegação")
+        if st.button("Sair", use_container_width=True):
+            st.session_state.user = None
+            st.session_state.selected_group = None
+            st.session_state.chat_history = []
+            st.rerun()
+
+
+def render_group_header():
+    """
+    Renderiza o cabeçalho contextual fixo do grupo selecionado.
+    Exibe informações básicas sem classificação ou análise.
+    """
+    group = st.session_state.selected_group
+
+    if not group:
+        return
+
+    st.markdown(
+        f"""
+        <div class="group-header">
+            <div class="group-header-title">
+                <span class="group-code">{group['codigo_grupo']}</span>
+                <span class="group-name">{group['nome_grupo']}</span>
+            </div>
+            <div class="group-header-info">
+                <div class="header-info-item">
+                    <span class="header-label">CNPJ</span>
+                    <span class="header-value">{group['cnpj']}</span>
+                </div>
+                <div class="header-info-item">
+                    <span class="header-label">Razão Social</span>
+                    <span class="header-value">{group['razao_social']}</span>
+                </div>
+                <div class="header-info-item">
+                    <span class="header-label">Rating</span>
+                    <span class="header-value">{group['rating']}</span>
+                </div>
+                <div class="header-info-item">
+                    <span class="header-label">Sócios</span>
+                    <span class="header-value">{group['quantidade_socios']}</span>
+                </div>
+                <div class="header-info-item">
+                    <span class="header-label">Principalidade</span>
+                    <span class="header-value">{group['principalidade']}</span>
+                </div>
+                <div class="header-info-item">
+                    <span class="header-label">Produtos</span>
+                    <span class="header-value">{group['quantidade_produtos']}</span>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_chart(chart_data: dict):
@@ -132,127 +416,36 @@ def render_disambiguation_card(ambiguity_result: dict):
                 resolution = amb.get("resolution", "")
                 amb_type = amb.get("type", "")
                 if term and resolution:
-                    st.markdown(f"• **{term}** → {resolution}")
+                    st.markdown(f"* **{term}** -> {resolution}")
                     if amb_type:
                         st.caption(f"   Tipo: {amb_type}")
 
         if inferred_period:
-            st.markdown(f"• **período inferido** → {inferred_period}")
+            st.markdown(f"* **período inferido** -> {inferred_period}")
 
         if inferred_domains:
             domains_str = ", ".join(inferred_domains)
-            st.markdown(f"• **domínios** → {domains_str}")
+            st.markdown(f"* **domínios** -> {domains_str}")
 
         st.markdown("---")
         st.caption(f"Pergunta interpretada: *{normalized}*")
 
 
-def render_domain_selection_page():
-    """
-    Tela 1 - Seleção de Informações/Domínios.
-    O usuário DEVE selecionar pelo menos um domínio antes de acessar o chat.
-    """
-    st.title("Plataforma Multiagente de IA")
-    st.markdown("---")
-
-    st.markdown("""
-    ### Seleção de Domínios de Dados
-
-    Antes de iniciar o chat, selecione os domínios de dados que deseja consultar.
-    Isso permite que os agentes especializados sejam acionados de forma otimizada.
-
-    **Recursos da plataforma:**
-    - Desambiguação automática de perguntas
-    - Agentes especializados por domínio
-    - Orquestração inteligente com LangGraph
-    - Sugestões de visualização de dados
-    - Rastreabilidade completa
-    """)
-
-    st.markdown("---")
-    st.markdown("### Selecione os domínios disponíveis:")
-
-    themes = get_available_themes()
-    descriptions = get_theme_descriptions()
-
-    selected_domains = []
-
-    cols = st.columns(len(themes))
-
-    for i, theme in enumerate(themes):
-        with cols[i]:
-            st.markdown(f"#### {theme.capitalize()}")
-            st.markdown(descriptions.get(theme, ""))
-
-            is_selected = st.checkbox(
-                f"Incluir {theme.capitalize()}",
-                key=f"domain_{theme}",
-                value=theme in st.session_state.active_domains,
-            )
-
-            if is_selected:
-                selected_domains.append(theme)
-
-    st.markdown("---")
-
-    col1, col2 = st.columns([3, 1])
-
-    with col1:
-        if selected_domains:
-            domains_text = ", ".join([d.capitalize() for d in selected_domains])
-            st.success(f"Domínios selecionados: **{domains_text}**")
-        else:
-            st.warning("Selecione pelo menos um domínio para continuar.")
-
-    with col2:
-        continue_disabled = len(selected_domains) == 0
-
-        if st.button(
-            "Continuar para o Chat",
-            use_container_width=True,
-            disabled=continue_disabled,
-            type="primary",
-        ):
-            st.session_state.active_domains = selected_domains
-            st.session_state.domains_selected = True
-
-            governance = get_governance_manager()
-            st.session_state.session_context = governance.create_session()
-            st.session_state.orchestrator = create_deep_orchestrator_instance(
-                st.session_state.session_context
-            )
-            st.session_state.messages = []
-            st.rerun()
-
-    st.markdown("---")
-
-    with st.expander("Sobre os domínios", expanded=False):
-        st.markdown("""
-        **Cadastro**: Informações cadastrais de clientes, incluindo dados pessoais,
-        endereços, contatos e histórico de cadastro.
-
-        **Financeiro**: Dados financeiros como transações, saldos, pagamentos
-        e histórico financeiro.
-
-        **Rentabilidade**: Métricas de rentabilidade, análises de lucro, margens,
-        ROI e indicadores de desempenho.
-        """)
-
-
 def render_chat_page():
     """
-    Tela 2 - Interface de Chat com IA.
-    Exibe respostas, plano, subagentes e processo de desambiguação.
+    Tela 3 - Chat com IA.
+    Interface de chat contextualizada pelo grupo selecionado.
     """
-    active_domains = st.session_state.active_domains
+    if not st.session_state.selected_group:
+        st.warning("Selecione um grupo para continuar.")
+        if st.button("Voltar para Seleção"):
+            st.rerun()
+        return
+
+    render_group_header()
 
     with st.sidebar:
-        st.title("Configurações")
-
-        domains_text = ", ".join([d.capitalize() for d in active_domains])
-        st.info(f"**Domínios ativos:** {domains_text}")
-
-        st.markdown("---")
+        st.markdown("### Configurações")
 
         st.session_state.show_details = st.checkbox(
             "Mostrar detalhes da execução",
@@ -261,11 +454,20 @@ def render_chat_page():
 
         st.markdown("---")
 
-        if st.button("Alterar Domínios", use_container_width=True):
-            st.session_state.domains_selected = False
-            st.session_state.messages = []
+        if st.button("Alterar Grupo", use_container_width=True):
+            st.session_state.selected_group = None
+            st.session_state.chat_history = []
             st.session_state.orchestrator = None
             st.session_state.pending_visualization = None
+            st.rerun()
+
+        st.markdown("---")
+
+        if st.button("Sair", use_container_width=True):
+            st.session_state.user = None
+            st.session_state.selected_group = None
+            st.session_state.chat_history = []
+            st.session_state.orchestrator = None
             st.rerun()
 
         st.markdown("---")
@@ -280,10 +482,21 @@ def render_chat_page():
         st.markdown("- DeepAgents")
         st.markdown("- Databricks")
 
-    st.title("Chat - Análise de Dados")
-    st.caption(f"Consultando: {domains_text}")
+    st.markdown("---")
 
-    for message in st.session_state.messages:
+    st.markdown(
+        f"""
+        <div class="chat-title">
+            Chat - Avaliação do Grupo
+        </div>
+        <div class="chat-subtitle">
+            Consultando: {st.session_state.selected_group['nome_grupo']}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    for message in st.session_state.chat_history:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
@@ -295,8 +508,9 @@ def render_chat_page():
                     with st.expander("Plano de Execução"):
                         for step in message["plan"]:
                             if step.get("agent") != "VisualizationAgent":
-                                status_icon = "○"
-                                st.markdown(f"{status_icon} **{step.get('agent', 'Agent')}**: {step.get('task', '')}")
+                                st.markdown(
+                                    f"* **{step.get('agent', 'Agent')}**: {step.get('task', '')}"
+                                )
 
                 if "sources" in message and message["sources"]:
                     with st.expander("Fontes Consultadas"):
@@ -330,8 +544,8 @@ def render_chat_page():
                 st.session_state.pending_visualization = None
                 st.rerun()
 
-    if prompt := st.chat_input("Digite sua pergunta..."):
-        st.session_state.messages.append({"role": "user", "content": prompt})
+    if prompt := st.chat_input("Digite sua pergunta sobre o grupo..."):
+        st.session_state.chat_history.append({"role": "user", "content": prompt})
 
         with st.chat_message("user"):
             st.markdown(prompt)
@@ -341,13 +555,24 @@ def render_chat_page():
                 try:
                     orchestrator = st.session_state.orchestrator
 
-                    result = orchestrator.process_query(prompt, active_domains)
+                    group_context = st.session_state.selected_group
+                    contextualized_prompt = (
+                        f"[Contexto: Grupo {group_context['codigo_grupo']} - "
+                        f"{group_context['nome_grupo']}]\n\n{prompt}"
+                    )
+
+                    result = orchestrator.process_query(
+                        contextualized_prompt,
+                        ["cadastro", "financeiro", "rentabilidade"],
+                    )
 
                     ambiguity_result = result.get("ambiguity_result", {})
                     if ambiguity_result and st.session_state.show_details:
                         render_disambiguation_card(ambiguity_result)
 
-                    response_text = result.get("response", "Não foi possível processar a pergunta.")
+                    response_text = result.get(
+                        "response", "Não foi possível processar a pergunta."
+                    )
                     st.markdown(response_text)
 
                     message_data = {
@@ -362,8 +587,10 @@ def render_chat_page():
                             with st.expander("Plano de Execução"):
                                 for step in result["plan"]:
                                     if step.get("agent") != "VisualizationAgent":
-                                        status_icon = "○"
-                                        st.markdown(f"{status_icon} **{step.get('agent', 'Agent')}**: {step.get('task', '')}")
+                                        st.markdown(
+                                            f"* **{step.get('agent', 'Agent')}**: "
+                                            f"{step.get('task', '')}"
+                                        )
 
                     if "sources" in result and result["sources"]:
                         message_data["sources"] = result["sources"]
@@ -394,12 +621,12 @@ def render_chat_page():
                                 "chart_data": viz_data,
                             }
 
-                    st.session_state.messages.append(message_data)
+                    st.session_state.chat_history.append(message_data)
 
                 except Exception as e:
                     error_msg = f"Erro ao processar pergunta: {e}"
                     st.error(error_msg)
-                    st.session_state.messages.append({
+                    st.session_state.chat_history.append({
                         "role": "assistant",
                         "content": error_msg,
                     })
@@ -408,11 +635,14 @@ def render_chat_page():
 def render_page():
     """
     Renderiza a página apropriada baseada no estado.
-    Tela 1 (seleção) é OBRIGATÓRIA antes da Tela 2 (chat).
+    Fluxo: Login → Seleção de Grupos → Chat
     """
+    apply_custom_styles()
     init_session_state()
 
-    if not st.session_state.domains_selected:
-        render_domain_selection_page()
+    if st.session_state.user is None:
+        render_login_page()
+    elif st.session_state.selected_group is None:
+        render_group_selection_page()
     else:
         render_chat_page()
