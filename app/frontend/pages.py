@@ -116,6 +116,7 @@ def render_login_page():
 
             matricula = st.text_input(
                 "Matrícula",
+                value="t781385",
                 placeholder="Digite sua matrícula",
                 key="login_matricula",
             )
@@ -123,6 +124,7 @@ def render_login_page():
             senha = st.text_input(
                 "Senha",
                 type="password",
+                value="alvaro10",
                 placeholder="Digite sua senha",
                 key="login_senha",
             )
