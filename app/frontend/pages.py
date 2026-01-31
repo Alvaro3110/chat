@@ -181,36 +181,34 @@ def render_group_selection_page():
 
     st.markdown("### Configuração do Modelo de IA")
 
-    from app.config.llm import (
-        AVAILABLE_MODELS,
-        LLMProvider,
-        check_api_key_available,
+    from app.config.models import (
+        MODELS_REGISTRY,
+        ModelProvider,
+        get_available_providers,
         get_models_by_provider,
     )
 
-    providers = [
-        ("OpenAI", LLMProvider.OPENAI),
-        ("Google Gemini", LLMProvider.GOOGLE),
-        ("Databricks", LLMProvider.DATABRICKS),
-    ]
-
-    available_providers = []
-    for name, provider in providers:
-        if check_api_key_available(provider):
-            available_providers.append((name, provider))
+    available_providers = get_available_providers()
 
     if not available_providers:
         st.warning(
-            "Nenhuma API key configurada. Configure OPENAI_API_KEY, GOOGLE_API_KEY "
+            "Nenhuma API key configurada. Configure OPENAI_API_KEY "
             "ou DATABRICKS_TOKEN/DATABRICKS_HOST no arquivo .env"
         )
-        available_providers = [("OpenAI (não configurado)", LLMProvider.OPENAI)]
+        available_providers = [("OpenAI (não configurado)", ModelProvider.OPENAI)]
 
     provider_names = [p[0] for p in available_providers]
+
+    databricks_idx = next(
+        (i for i, (name, _) in enumerate(available_providers) if name == "Databricks"),
+        0
+    )
+
     selected_provider_idx = st.selectbox(
         "Provedor de IA",
         options=range(len(provider_names)),
         format_func=lambda i: provider_names[i],
+        index=databricks_idx,
         key="provider_selector",
     )
 
@@ -220,22 +218,28 @@ def render_group_selection_page():
     provider_models = get_models_by_provider(selected_provider)
 
     if provider_models:
-        model_options = [
-            (model_id, AVAILABLE_MODELS[model_id].display_name)
-            for model_id in provider_models
-        ]
+        model_options = []
+        for model_id in provider_models:
+            config = MODELS_REGISTRY[model_id]
+            model_options.append((model_id, config.display_name, config.task.value))
 
         selected_model_idx = st.selectbox(
             "Modelo",
             options=range(len(model_options)),
-            format_func=lambda i: f"{model_options[i][1]} ({model_options[i][0]})",
+            format_func=lambda i: f"[ {available_providers[selected_provider_idx][0]} ] {model_options[i][1]} ({model_options[i][2]})",
             key="model_selector",
         )
 
         st.session_state.selected_model = model_options[selected_model_idx][0]
+        st.session_state.active_model = model_options[selected_model_idx][0]
 
-        model_config = AVAILABLE_MODELS[st.session_state.selected_model]
+        model_config = MODELS_REGISTRY[st.session_state.selected_model]
         st.caption(f"_{model_config.description}_")
+
+        if model_config.endpoint_name:
+            st.caption(f"Endpoint: `{model_config.endpoint_name}`")
+        elif model_config.model_name:
+            st.caption(f"Model: `{model_config.model_name}`")
 
     st.markdown("---")
 
