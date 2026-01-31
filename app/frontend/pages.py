@@ -556,14 +556,11 @@ def render_chat_page():
                     orchestrator = st.session_state.orchestrator
 
                     group_context = st.session_state.selected_group
-                    contextualized_prompt = (
-                        f"[Contexto: Grupo {group_context['codigo_grupo']} - "
-                        f"{group_context['nome_grupo']}]\n\n{prompt}"
-                    )
 
                     result = orchestrator.process_query(
-                        contextualized_prompt,
+                        prompt,
                         ["cadastro", "financeiro", "rentabilidade"],
+                        group_context=group_context,
                     )
 
                     ambiguity_result = result.get("ambiguity_result", {})
