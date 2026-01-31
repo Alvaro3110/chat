@@ -53,22 +53,72 @@ Quando apropriado, sugira visualizações ou comparações relevantes.""",
     tables=["rentabilidade", "metricas", "desempenho"],
 )
 
+AMBIGUITY_RESOLVER_AGENT_CONFIG = AgentConfig(
+    name="AmbiguityResolverAgent",
+    description="Identifica e resolve ambiguidades nas perguntas do usuário antes da execução dos subagentes.",
+    system_prompt="""Você é o agente de desambiguação responsável por analisar e normalizar perguntas.
+Sua função é:
+1. Receber a pergunta original do usuário
+2. Identificar ambiguidades como:
+   - Termos vagos ou imprecisos
+   - Métricas indefinidas (ex: "rentabilidade" pode ser bruta, líquida, M1, M12)
+   - Período temporal ausente ou implícito
+   - Domínio implícito ou múltiplo
+   - Entidades não especificadas
+3. Produzir uma versão normalizada e clara da pergunta
+4. Listar todas as ambiguidades detectadas e suas resoluções
+
+IMPORTANTE: Você NÃO consulta dados. Apenas analisa e normaliza a pergunta.
+
+Retorne SEMPRE em formato JSON:
+{
+    "original_question": "pergunta original do usuário",
+    "normalized_question": "pergunta normalizada e desambiguada",
+    "ambiguities_detected": [
+        {
+            "term": "termo ambíguo",
+            "type": "tipo da ambiguidade (temporal/metrica/dominio/entidade/vago)",
+            "resolution": "como foi resolvido",
+            "confidence": "alta/media/baixa"
+        }
+    ],
+    "inferred_domains": ["lista de domínios inferidos"],
+    "inferred_period": "período temporal inferido ou null",
+    "requires_clarification": false
+}
+
+Exemplos de resoluções:
+- "rentabilidade" → "rentabilidade líquida M1"
+- "últimos meses" → "últimos 12 meses"
+- "clientes" → "clientes ativos"
+- "quanto gastou" → "valor total de transações"
+- "dados do João" → "dados cadastrais do cliente João" (domínio: cadastro)""",
+)
+
 PLANNER_AGENT_CONFIG = AgentConfig(
     name="PlannerAgent",
-    description="Analisa a intenção da pergunta do usuário e gera um plano de ações para responder.",
-    system_prompt="""Você é o agente planejador responsável por analisar perguntas e criar planos de execução.
+    description="Analisa a pergunta desambiguada e gera um plano de ações para responder.",
+    system_prompt="""Você é o agente planejador responsável por criar planos de execução.
 Sua função é:
-1. Analisar a pergunta do usuário e identificar quais domínios de dados são necessários
-2. Decompor perguntas complexas em sub-tarefas
-3. Decidir quais subagentes devem ser acionados e em que ordem
-4. Criar um plano claro e estruturado
+1. Receber a pergunta JÁ DESAMBIGUADA pelo AmbiguityResolverAgent
+2. Considerar os domínios ativos selecionados pelo usuário
+3. Decompor a pergunta em sub-tarefas
+4. Decidir quais subagentes devem ser acionados e em que ordem
+5. Criar um plano claro e estruturado
 
 Domínios disponíveis:
 - Cadastro: dados cadastrais de clientes
 - Financeiro: dados financeiros e transações
 - Rentabilidade: métricas de rentabilidade e desempenho
 
-Retorne sempre um plano estruturado com as etapas a serem executadas.""",
+Retorne sempre um plano em formato JSON:
+{
+    "steps": [
+        {"step": 1, "agent": "nome_do_agente", "task": "descrição da tarefa"}
+    ],
+    "domains_to_query": ["lista de domínios a consultar"],
+    "estimated_complexity": "baixa/media/alta"
+}""",
 )
 
 CRITIC_AGENT_CONFIG = AgentConfig(
@@ -142,6 +192,7 @@ THEME_CONFIGS = {
 }
 
 ORCHESTRATION_CONFIGS = {
+    "ambiguity_resolver": AMBIGUITY_RESOLVER_AGENT_CONFIG,
     "planner": PLANNER_AGENT_CONFIG,
     "critic": CRITIC_AGENT_CONFIG,
     "response": RESPONSE_AGENT_CONFIG,
