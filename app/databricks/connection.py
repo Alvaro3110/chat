@@ -59,7 +59,7 @@ class DatabricksConnection:
             columns = [desc[0] for desc in cursor.description]
             results = []
             for row in cursor.fetchall():
-                results.append(dict(zip(columns, row)))
+                results.append(dict(zip(columns, row, strict=False)))
             return results
         finally:
             cursor.close()
