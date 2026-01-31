@@ -1,6 +1,7 @@
 """
 Orquestração com LangGraph e DeepAgents.
 Implementa o fluxo de agentes usando StateGraph com desambiguação.
+Suporta múltiplos provedores de LLM (OpenAI e Google Gemini).
 
 Fluxo obrigatório:
 User Input → AmbiguityResolverAgent → PlannerAgent → Subagentes → CriticAgent → ResponseAgent
@@ -9,6 +10,7 @@ User Input → AmbiguityResolverAgent → PlannerAgent → Subagentes → Critic
 import json
 from typing import Annotated, Any, TypedDict
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
@@ -23,6 +25,7 @@ from app.config.agents import (
     RESPONSE_AGENT_CONFIG,
     VISUALIZATION_AGENT_CONFIG,
 )
+from app.config.llm import DEFAULT_MODEL, create_llm
 from app.governance.logging import SessionContext
 from app.tools.databricks_tools import (
     describe_table,
@@ -67,6 +70,8 @@ def parse_json_response(content: str) -> dict[str, Any] | None:
 
 def create_langgraph_workflow(
     session: SessionContext | None = None,
+    model_id: str | None = None,
+    llm: BaseChatModel | None = None,
 ) -> StateGraph:
     """
     Cria o workflow usando LangGraph com fluxo de desambiguação.
@@ -75,13 +80,14 @@ def create_langgraph_workflow(
 
     Args:
         session: Contexto da sessão
+        model_id: ID do modelo LLM a usar (ex: "gpt-4o-mini", "gemini-1.5-flash")
+        llm: Instância do LLM já configurada (opcional, sobrescreve model_id)
 
     Returns:
         Grafo compilado
     """
-    from langchain_openai import ChatOpenAI
-
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    if llm is None:
+        llm = create_llm(model_id or DEFAULT_MODEL)
 
     def ambiguity_resolver_node(state: AgentState) -> dict[str, Any]:
         """
@@ -411,9 +417,11 @@ class DeepAgentOrchestrator:
     def __init__(
         self,
         session: SessionContext | None = None,
+        model_id: str | None = None,
     ):
         self.session = session
-        self.agent = create_langgraph_workflow(session)
+        self.model_id = model_id or DEFAULT_MODEL
+        self.agent = create_langgraph_workflow(session, model_id=self.model_id)
 
     def process_query(
         self,
@@ -477,6 +485,7 @@ class DeepAgentOrchestrator:
 
 def create_deep_orchestrator_instance(
     session: SessionContext | None = None,
+    model_id: str | None = None,
 ) -> DeepAgentOrchestrator:
     """Factory function para criar o orquestrador."""
-    return DeepAgentOrchestrator(session=session)
+    return DeepAgentOrchestrator(session=session, model_id=model_id)

@@ -1,4 +1,4 @@
-"""Configurações dos agentes."""
+"""Configurações dos agentes e LLMs."""
 
 from app.config.agents import (
     AMBIGUITY_RESOLVER_AGENT_CONFIG,
@@ -17,6 +17,19 @@ from app.config.agents import (
     get_theme_config,
     get_theme_descriptions,
 )
+from app.config.llm import (
+    AVAILABLE_MODELS,
+    DEFAULT_MODEL,
+    LLMConfig,
+    LLMProvider,
+    check_api_key_available,
+    create_llm,
+    get_available_models,
+    get_available_models_with_keys,
+    get_model_config,
+    get_model_display_info,
+    get_models_by_provider,
+)
 
 __all__ = [
     "AgentConfig",
@@ -34,4 +47,15 @@ __all__ = [
     "get_theme_config",
     "get_available_themes",
     "get_theme_descriptions",
+    "AVAILABLE_MODELS",
+    "DEFAULT_MODEL",
+    "LLMConfig",
+    "LLMProvider",
+    "check_api_key_available",
+    "create_llm",
+    "get_available_models",
+    "get_available_models_with_keys",
+    "get_model_config",
+    "get_model_display_info",
+    "get_models_by_provider",
 ]

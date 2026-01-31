@@ -7,7 +7,7 @@ from typing import Any
 
 from langchain_core.tools import tool
 
-from app.databricks.connection import get_db_connection
+from app.db_connection.connection import get_db_connection
 
 
 @tool
