@@ -7,8 +7,6 @@ Frontend apenas coleta contexto e exibe estado - sem lógica de negócio.
 import streamlit as st
 
 from app.frontend.styles import apply_custom_styles
-from app.governance.logging import get_governance_manager
-from app.orchestration.graph import create_deep_orchestrator_instance
 
 SAMPLE_GROUPS = [
     {
@@ -253,6 +251,9 @@ def render_group_selection_page():
                     "principalidade": group["principalidade"],
                     "quantidade_produtos": group["quantidade_produtos"],
                 }
+
+                from app.governance.logging import get_governance_manager
+                from app.orchestration.graph import create_deep_orchestrator_instance
 
                 governance = get_governance_manager()
                 st.session_state.session_context = governance.create_session()
