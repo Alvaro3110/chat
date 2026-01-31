@@ -109,23 +109,27 @@ def create_langgraph_workflow(
     user_id: str | None = None,
     model_id: str | None = None,
 ) -> StateGraph:
-    from langchain_openai import ChatOpenAI
-
-    from app.config.models import FALLBACK_MODEL, ModelProvider, get_model_config
+    from app.config.models import DEFAULT_MODEL, get_model_config
 
     print("\n[DEBUG] ========== CREATING LANGGRAPH WORKFLOW ==========")
     print(f"[DEBUG] Requested model_id: {model_id}")
 
-    model_config = get_model_config(model_id) if model_id else None
+    if not model_id:
+        model_id = DEFAULT_MODEL
+        print(f"[DEBUG] No model_id provided, using DEFAULT_MODEL: {model_id}")
+
+    model_config = get_model_config(model_id)
     supports_tools = False
     llm = None
-    fallback_llm = None
+    active_provider = None
 
     if model_config:
         print(f"[DEBUG] Model config found: {model_config.display_name}")
         print(f"[DEBUG] Provider: {model_config.provider.value}")
+        print(f"[DEBUG] Endpoint: {model_config.endpoint_name or model_config.model_name}")
         print(f"[DEBUG] Supports tools: {model_config.supports_tools}")
         supports_tools = model_config.supports_tools
+        active_provider = model_config.provider
 
         try:
             from app.config.llm import create_llm
@@ -134,22 +138,15 @@ def create_langgraph_workflow(
         except Exception as e:
             print(f"[DEBUG] ERROR creating LLM: {e}")
             print(f"[DEBUG] Stack trace:\n{traceback.format_exc()}")
-            llm = None
+            print("[DEBUG] CRITICAL: LLM creation failed. NOT using silent fallback.")
+            print("[DEBUG] CRITICAL: Please check your Databricks credentials and endpoint configuration.")
+            raise RuntimeError(f"Failed to create LLM for model {model_id}: {e}") from e
     else:
-        print(f"[DEBUG] Model config not found for: {model_id}")
+        print(f"[DEBUG] ERROR: Model config not found for: {model_id}")
+        print("[DEBUG] CRITICAL: Invalid model_id. NOT using silent fallback.")
+        raise ValueError(f"Model config not found for: {model_id}")
 
-    if llm is None:
-        print(f"[DEBUG] Using fallback OpenAI model: {FALLBACK_MODEL}")
-        fallback_config = get_model_config(FALLBACK_MODEL)
-        if fallback_config:
-            supports_tools = fallback_config.supports_tools
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-        print(f"[DEBUG] Fallback LLM created: {type(llm).__name__}")
-
-    if model_config and model_config.provider == ModelProvider.DATABRICKS:
-        print("[DEBUG] Creating OpenAI fallback for tool operations (Databricks doesn't support bind_tools)")
-        fallback_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-
+    print(f"[DEBUG] Active provider: {active_provider.value if active_provider else 'None'}")
     print("[DEBUG] ========== WORKFLOW SETUP COMPLETE ==========\n")
 
     memory_agent: MemoryAgent | None = create_memory_agent(user_id) if user_id else None
@@ -226,16 +223,16 @@ Retorne JSON com o plano."""
     # -----------------------------------------------------------------
     def executor_node(state: AgentState) -> dict[str, Any]:
         print("\n[DEBUG] ========== EXECUTOR NODE ==========")
+        print(f"[DEBUG] Active provider: {active_provider.value if active_provider else 'None'}")
+        print(f"[DEBUG] Model: {model_id}")
         responses = []
 
         if supports_tools:
             print("[DEBUG] Model supports tools, using bind_tools")
             llm_for_tools = llm.bind_tools(DATABRICKS_TOOLS)
-        elif fallback_llm:
-            print("[DEBUG] Model doesn't support tools, using OpenAI fallback for tool operations")
-            llm_for_tools = fallback_llm.bind_tools(DATABRICKS_TOOLS)
         else:
-            print("[DEBUG] No tool support available, using LLM directly without tools")
+            print("[DEBUG] Model doesn't support bind_tools, using LLM directly")
+            print("[DEBUG] NOTE: Databricks models don't support LangChain bind_tools")
             llm_for_tools = llm
 
         for step in state.get("plan", []):
