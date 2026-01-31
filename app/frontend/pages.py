@@ -1,11 +1,17 @@
 """
 Páginas do frontend Streamlit.
 Implementa fluxo de duas telas: seleção de domínios e chat com desambiguação.
+Suporta múltiplos provedores de LLM (OpenAI e Google Gemini).
 """
 
 import streamlit as st
 
 from app.config.agents import get_available_themes, get_theme_descriptions
+from app.config.llm import (
+    DEFAULT_MODEL,
+    get_model_config,
+    get_model_display_info,
+)
 from app.governance.logging import get_governance_manager
 from app.orchestration.graph import create_deep_orchestrator_instance
 
@@ -32,6 +38,9 @@ def init_session_state():
 
     if "pending_visualization" not in st.session_state:
         st.session_state.pending_visualization = None
+
+    if "selected_model" not in st.session_state:
+        st.session_state.selected_model = DEFAULT_MODEL
 
 
 def render_chart(chart_data: dict):
@@ -167,6 +176,7 @@ def render_domain_selection_page():
     - Orquestração inteligente com LangGraph
     - Sugestões de visualização de dados
     - Rastreabilidade completa
+    - Suporte a múltiplos modelos de IA (OpenAI e Google Gemini)
     """)
 
     st.markdown("---")
@@ -219,10 +229,70 @@ def render_domain_selection_page():
             governance = get_governance_manager()
             st.session_state.session_context = governance.create_session()
             st.session_state.orchestrator = create_deep_orchestrator_instance(
-                st.session_state.session_context
+                st.session_state.session_context,
+                model_id=st.session_state.selected_model,
             )
             st.session_state.messages = []
             st.rerun()
+
+    st.markdown("---")
+
+    st.markdown("### Selecione o modelo de IA:")
+
+    model_info = get_model_display_info()
+
+    openai_models = [m for m in model_info if m["provider"] == "openai"]
+    gemini_models = [m for m in model_info if m["provider"] == "gemini"]
+
+    col_openai, col_gemini = st.columns(2)
+
+    with col_openai:
+        st.markdown("#### OpenAI (ChatGPT)")
+        st.radio(
+            "Modelo OpenAI",
+            options=[m["id"] for m in openai_models],
+            format_func=lambda x: next(
+                (m["display_name"] + (" (sem API key)" if not m["available"] else "")
+                 for m in openai_models if m["id"] == x),
+                x
+            ),
+            key="openai_model_radio",
+            index=0,
+            label_visibility="collapsed",
+        )
+
+    with col_gemini:
+        st.markdown("#### Google (Gemini)")
+        st.radio(
+            "Modelo Gemini",
+            options=[m["id"] for m in gemini_models],
+            format_func=lambda x: next(
+                (m["display_name"] + (" (sem API key)" if not m["available"] else "")
+                 for m in gemini_models if m["id"] == x),
+                x
+            ),
+            key="gemini_model_radio",
+            index=0,
+            label_visibility="collapsed",
+        )
+
+    provider_choice = st.radio(
+        "Escolha o provedor:",
+        options=["OpenAI", "Google Gemini"],
+        horizontal=True,
+        key="provider_choice",
+    )
+
+    if provider_choice == "OpenAI":
+        selected_model = st.session_state.get("openai_model_radio", "gpt-4o-mini")
+    else:
+        selected_model = st.session_state.get("gemini_model_radio", "gemini-1.5-flash")
+
+    model_config = get_model_config(selected_model)
+    if model_config:
+        st.caption(f"Modelo selecionado: **{model_config.display_name}**")
+
+    st.session_state.selected_model = selected_model
 
     st.markdown("---")
 
@@ -273,6 +343,13 @@ def render_chat_page():
         if st.session_state.session_context:
             st.markdown("**Session ID:**")
             st.code(st.session_state.session_context.session_id[:8] + "...")
+
+        st.markdown("---")
+
+        model_config = get_model_config(st.session_state.selected_model)
+        if model_config:
+            st.markdown("**Modelo de IA:**")
+            st.markdown(f"- {model_config.display_name}")
 
         st.markdown("---")
         st.markdown("**Powered by:**")
