@@ -1,11 +1,12 @@
 """
 Orquestração com LangGraph e DeepAgents.
 Fluxo com desambiguação, memória e validação.
-VERSÃO ENTERPRISE-SAFE.
+VERSÃO ENTERPRISE-SAFE com debugging detalhado.
 """
 
 import json
 import logging
+import traceback
 from typing import Annotated, Any, TypedDict
 
 from langchain_core.messages import AIMessage, HumanMessage
@@ -14,13 +15,7 @@ from langgraph.graph.message import add_messages
 
 from app.config.agents import (
     AMBIGUITY_RESOLVER_AGENT_CONFIG,
-    CADASTRO_AGENT_CONFIG,
-    CRITIC_AGENT_CONFIG,
-    FINANCEIRO_AGENT_CONFIG,
     PLANNER_AGENT_CONFIG,
-    RENTABILIDADE_AGENT_CONFIG,
-    RESPONSE_AGENT_CONFIG,
-    VISUALIZATION_AGENT_CONFIG,
 )
 from app.governance.logging import SessionContext
 from app.memory.memory_agent import MemoryAgent, create_memory_agent
@@ -32,6 +27,7 @@ from app.tools.databricks_tools import (
 )
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
 # ---------------------------------------------------------------------
@@ -113,15 +109,48 @@ def create_langgraph_workflow(
     user_id: str | None = None,
     model_id: str | None = None,
 ) -> StateGraph:
-    from app.config.llm import create_llm
     from langchain_openai import ChatOpenAI
 
-    try:
-        llm = create_llm(model_id=model_id, temperature=0)
-        logger.info(f"Using LLM model: {model_id or 'default'}")
-    except Exception as e:
-        logger.warning(f"Fallback OpenAI: {e}")
+    from app.config.models import FALLBACK_MODEL, ModelProvider, get_model_config
+
+    print("\n[DEBUG] ========== CREATING LANGGRAPH WORKFLOW ==========")
+    print(f"[DEBUG] Requested model_id: {model_id}")
+
+    model_config = get_model_config(model_id) if model_id else None
+    supports_tools = False
+    llm = None
+    fallback_llm = None
+
+    if model_config:
+        print(f"[DEBUG] Model config found: {model_config.display_name}")
+        print(f"[DEBUG] Provider: {model_config.provider.value}")
+        print(f"[DEBUG] Supports tools: {model_config.supports_tools}")
+        supports_tools = model_config.supports_tools
+
+        try:
+            from app.config.llm import create_llm
+            llm = create_llm(model_id=model_id, temperature=0)
+            print(f"[DEBUG] LLM created successfully: {type(llm).__name__}")
+        except Exception as e:
+            print(f"[DEBUG] ERROR creating LLM: {e}")
+            print(f"[DEBUG] Stack trace:\n{traceback.format_exc()}")
+            llm = None
+    else:
+        print(f"[DEBUG] Model config not found for: {model_id}")
+
+    if llm is None:
+        print(f"[DEBUG] Using fallback OpenAI model: {FALLBACK_MODEL}")
+        fallback_config = get_model_config(FALLBACK_MODEL)
+        if fallback_config:
+            supports_tools = fallback_config.supports_tools
         llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+        print(f"[DEBUG] Fallback LLM created: {type(llm).__name__}")
+
+    if model_config and model_config.provider == ModelProvider.DATABRICKS:
+        print("[DEBUG] Creating OpenAI fallback for tool operations (Databricks doesn't support bind_tools)")
+        fallback_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+    print("[DEBUG] ========== WORKFLOW SETUP COMPLETE ==========\n")
 
     memory_agent: MemoryAgent | None = create_memory_agent(user_id) if user_id else None
 
@@ -196,24 +225,51 @@ Retorne JSON com o plano."""
 
     # -----------------------------------------------------------------
     def executor_node(state: AgentState) -> dict[str, Any]:
+        print("\n[DEBUG] ========== EXECUTOR NODE ==========")
         responses = []
-        llm_tools = llm.bind_tools(DATABRICKS_TOOLS)
+
+        if supports_tools:
+            print("[DEBUG] Model supports tools, using bind_tools")
+            llm_for_tools = llm.bind_tools(DATABRICKS_TOOLS)
+        elif fallback_llm:
+            print("[DEBUG] Model doesn't support tools, using OpenAI fallback for tool operations")
+            llm_for_tools = fallback_llm.bind_tools(DATABRICKS_TOOLS)
+        else:
+            print("[DEBUG] No tool support available, using LLM directly without tools")
+            llm_for_tools = llm
 
         for step in state.get("plan", []):
             agent_name = step.get("agent", "")
             task = step.get("task", state["normalized_query"])
 
+            print(f"[DEBUG] Executing step: agent={agent_name}, task_preview={task[:100]}...")
+
             if agent_name == "VisualizationAgent":
+                print("[DEBUG] Skipping VisualizationAgent")
                 continue
 
-            response = llm_tools.invoke([HumanMessage(content=task)])
-            content = normalize_llm_content(response.content)
+            try:
+                print("[DEBUG] Invoking LLM for task...")
+                response = llm_for_tools.invoke([HumanMessage(content=task)])
+                content = normalize_llm_content(response.content)
+                print(f"[DEBUG] Response received, content_length={len(content)}")
 
-            responses.append({
-                "agent": agent_name,
-                "response": content,
-                "success": True,
-            })
+                responses.append({
+                    "agent": agent_name,
+                    "response": content,
+                    "success": True,
+                })
+            except Exception as e:
+                print(f"[DEBUG] ERROR in executor: {e}")
+                print(f"[DEBUG] Stack trace:\n{traceback.format_exc()}")
+                responses.append({
+                    "agent": agent_name,
+                    "response": f"Erro: {str(e)}",
+                    "success": False,
+                })
+
+        print(f"[DEBUG] Executor completed with {len(responses)} responses")
+        print("[DEBUG] ========== EXECUTOR NODE END ==========\n")
 
         return {
             "subagent_responses": responses,

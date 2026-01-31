@@ -1,9 +1,12 @@
 """
 Wrapper para modelos Databricks usando databricks-sdk.
 Implementa interface compatível com LangChain BaseChatModel.
+Inclui debugging detalhado em terminal para observabilidade.
 """
 
+import json
 import logging
+import traceback
 from collections.abc import Iterator
 from typing import Any
 
@@ -13,6 +16,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langchain_core.outputs import ChatGeneration, ChatResult
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
 class ChatDatabricks(BaseChatModel):
@@ -52,6 +56,11 @@ class ChatDatabricks(BaseChatModel):
 
     def _initialize_client(self) -> None:
         """Inicializa o cliente Databricks SDK."""
+        print("[DEBUG] Initializing Databricks client...")
+        print("[DEBUG] Provider: databricks")
+        print(f"[DEBUG] Endpoint: {self.endpoint}")
+        print(f"[DEBUG] Host: {self.host[:30]}..." if len(self.host) > 30 else f"[DEBUG] Host: {self.host}")
+
         try:
             from databricks.sdk import WorkspaceClient
 
@@ -59,14 +68,18 @@ class ChatDatabricks(BaseChatModel):
                 host=self.host,
                 token=self.token,
             )
-            logger.info(f"Databricks client initialized for endpoint: {self.endpoint}")
-        except ImportError:
+            logger.info(f"[DEBUG] Databricks client initialized for endpoint: {self.endpoint}")
+            print("[DEBUG] Databricks client initialized successfully")
+        except ImportError as e:
             logger.warning(
                 "databricks-sdk not installed. Install with: pip install databricks-sdk"
             )
+            print(f"[DEBUG] ERROR: databricks-sdk not installed: {e}")
             self._client = None
         except Exception as e:
             logger.error(f"Failed to initialize Databricks client: {e}")
+            print(f"[DEBUG] ERROR: Failed to initialize Databricks client: {e}")
+            print(f"[DEBUG] Stack trace:\n{traceback.format_exc()}")
             self._client = None
 
     @property
@@ -126,28 +139,110 @@ class ChatDatabricks(BaseChatModel):
         Returns:
             ChatResult com a resposta gerada
         """
+        print("\n[DEBUG] ========== DATABRICKS LLM GENERATE ==========")
+        print("[DEBUG] Provider: databricks")
+        print(f"[DEBUG] Endpoint: {self.endpoint}")
+        print(f"[DEBUG] Temperature: {self.temperature}")
+        print(f"[DEBUG] Max tokens: {self.max_tokens}")
+        print(f"[DEBUG] Number of messages: {len(messages)}")
+
         if self._client is None:
+            print("[DEBUG] ERROR: Client not initialized, using fallback")
             return self._generate_fallback(messages)
 
         databricks_messages = self._convert_messages_to_databricks_format(messages)
+        print(f"[DEBUG] Converted messages count: {len(databricks_messages)}")
+        for i, msg in enumerate(databricks_messages):
+            role = msg.get("role", "unknown")
+            content_preview = str(msg.get("content", ""))[:100]
+            print(f"[DEBUG] Message {i}: role={role}, content_preview={content_preview}...")
 
         try:
+            print("[DEBUG] Calling Databricks endpoint...")
             response = self._call_databricks_endpoint(
                 databricks_messages,
                 stop=stop,
                 **kwargs,
             )
 
-            content = response.get("choices", [{}])[0].get("message", {}).get("content", "")
+            print(f"[DEBUG] Response type: {type(response).__name__}")
+            print(f"[DEBUG] Response keys: {list(response.keys()) if isinstance(response, dict) else 'N/A'}")
+
+            content = self._extract_content_from_response(response)
+            print(f"[DEBUG] Extracted content length: {len(content)}")
+            print(f"[DEBUG] Content preview: {content[:200]}..." if len(content) > 200 else f"[DEBUG] Content: {content}")
 
             message = AIMessage(content=content)
             generation = ChatGeneration(message=message)
 
+            print("[DEBUG] ========== DATABRICKS LLM SUCCESS ==========\n")
             return ChatResult(generations=[generation])
 
         except Exception as e:
+            print(f"[DEBUG] ERROR calling Databricks endpoint: {e}")
+            print(f"[DEBUG] Stack trace:\n{traceback.format_exc()}")
             logger.error(f"Error calling Databricks endpoint: {e}")
             return self._generate_fallback(messages, error=str(e))
+
+    def _extract_content_from_response(self, response: Any) -> str:
+        """
+        Extrai conteúdo da resposta do Databricks de forma robusta.
+        Lida com diferentes formatos de resposta.
+        """
+        print("[DEBUG] Normalizing response content...")
+
+        if response is None:
+            print("[DEBUG] Response is None")
+            return ""
+
+        if isinstance(response, str):
+            print("[DEBUG] Response is string")
+            return response
+
+        if isinstance(response, dict):
+            print(f"[DEBUG] Response is dict with keys: {list(response.keys())}")
+
+            if "choices" in response:
+                choices = response["choices"]
+                if choices and len(choices) > 0:
+                    choice = choices[0]
+                    if isinstance(choice, dict):
+                        if "message" in choice:
+                            msg = choice["message"]
+                            if isinstance(msg, dict) and "content" in msg:
+                                return str(msg["content"])
+                        if "text" in choice:
+                            return str(choice["text"])
+                        if "content" in choice:
+                            return str(choice["content"])
+
+            if "content" in response:
+                return str(response["content"])
+
+            if "text" in response:
+                return str(response["text"])
+
+            if "output" in response:
+                return str(response["output"])
+
+            if "result" in response:
+                return str(response["result"])
+
+            print("[DEBUG] Could not find content in dict, returning str(response)")
+            return str(response)
+
+        if isinstance(response, list):
+            print(f"[DEBUG] Response is list with {len(response)} items")
+            parts = []
+            for item in response:
+                if isinstance(item, dict):
+                    parts.append(str(item.get("text") or item.get("content") or item))
+                else:
+                    parts.append(str(item))
+            return "\n".join(parts)
+
+        print(f"[DEBUG] Response is {type(response).__name__}, converting to string")
+        return str(response)
 
     def _call_databricks_endpoint(
         self,
@@ -184,10 +279,30 @@ class ChatDatabricks(BaseChatModel):
         if stop:
             payload["stop"] = stop
 
-        response = requests.post(url, headers=headers, json=payload, timeout=120)
-        response.raise_for_status()
+        print(f"[DEBUG] Endpoint URL: {url}")
+        print("[DEBUG] Payload type: chat")
+        print(f"[DEBUG] Payload (without sensitive data): messages_count={len(messages)}, temperature={self.temperature}, max_tokens={self.max_tokens}")
 
-        return response.json()
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=120)
+            print(f"[DEBUG] HTTP Status Code: {response.status_code}")
+
+            if response.status_code != 200:
+                print(f"[DEBUG] ERROR Response body: {response.text[:500]}")
+
+            response.raise_for_status()
+
+            result = response.json()
+            print(f"[DEBUG] Raw response (truncated): {json.dumps(result)[:500]}...")
+            return result
+
+        except requests.exceptions.HTTPError as e:
+            print(f"[DEBUG] HTTP Error: {e}")
+            print(f"[DEBUG] Response body: {e.response.text if e.response else 'N/A'}")
+            raise
+        except requests.exceptions.RequestException as e:
+            print(f"[DEBUG] Request Error: {e}")
+            raise
 
     def _generate_fallback(
         self,
