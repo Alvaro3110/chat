@@ -17,6 +17,17 @@ from app.config.agents import (
     get_theme_config,
     get_theme_descriptions,
 )
+from app.config.catalog_config import (
+    CatalogConfig,
+    ColumnMetadata,
+    DataDomain,
+    TableMetadata,
+    UnityCatalogRegistry,
+    get_catalog_registry,
+    get_domain_tables_context,
+    get_table_context_for_query,
+    register_table_metadata,
+)
 from app.config.llm import create_llm
 from app.config.models import (
     DEFAULT_MODEL,
@@ -58,4 +69,13 @@ __all__ = [
     "get_model_config",
     "get_model_display_info",
     "get_models_by_provider",
+    "CatalogConfig",
+    "ColumnMetadata",
+    "DataDomain",
+    "TableMetadata",
+    "UnityCatalogRegistry",
+    "get_catalog_registry",
+    "get_domain_tables_context",
+    "get_table_context_for_query",
+    "register_table_metadata",
 ]
