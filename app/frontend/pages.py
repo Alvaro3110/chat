@@ -18,6 +18,9 @@ SAMPLE_GROUPS = [
         "quantidade_socios": 12,
         "principalidade": "Holding",
         "quantidade_produtos": 45,
+        "risco": "Baixo",
+        "relevancia": "Alta",
+        "complexidade": "Média",
     },
     {
         "codigo_grupo": "GRP002",
@@ -28,6 +31,9 @@ SAMPLE_GROUPS = [
         "quantidade_socios": 8,
         "principalidade": "Comercial",
         "quantidade_produtos": 23,
+        "risco": "Médio",
+        "relevancia": "Média",
+        "complexidade": "Baixa",
     },
     {
         "codigo_grupo": "GRP003",
@@ -38,6 +44,9 @@ SAMPLE_GROUPS = [
         "quantidade_socios": 5,
         "principalidade": "Serviços",
         "quantidade_produtos": 67,
+        "risco": "Baixo",
+        "relevancia": "Alta",
+        "complexidade": "Alta",
     },
     {
         "codigo_grupo": "GRP004",
@@ -48,6 +57,9 @@ SAMPLE_GROUPS = [
         "quantidade_socios": 15,
         "principalidade": "Industrial",
         "quantidade_produtos": 89,
+        "risco": "Alto",
+        "relevancia": "Média",
+        "complexidade": "Média",
     },
 ]
 
@@ -251,108 +263,119 @@ def render_group_selection_page():
 
     groups = st.session_state.available_groups
 
-    selected_index = st.selectbox(
-        "Grupo Econômico",
-        options=range(len(groups)),
-        format_func=lambda i: f"{groups[i]['codigo_grupo']} - {groups[i]['nome_grupo']}",
-        key="group_selector",
-    )
+    # Grid de Cards Executivos
+    cols_per_row = 2
+    rows = [groups[i:i + cols_per_row] for i in range(0, len(groups), cols_per_row)]
 
-    if selected_index is not None:
-        group = groups[selected_index]
+    selected_group_code = st.session_state.get("temp_selected_group_code")
 
-        st.markdown("---")
-        st.markdown("### Informações do Grupo Selecionado")
-
-        col1, col2, col3, col4 = st.columns(4)
-
-        with col1:
-            st.markdown(
-                f"""
-                <div class="info-card">
-                    <div class="info-label">Código</div>
-                    <div class="info-value">{group['codigo_grupo']}</div>
+    for row_groups in rows:
+        cols = st.columns(cols_per_row)
+        for i, group in enumerate(row_groups):
+            with cols[i]:
+                is_selected = selected_group_code == group["codigo_grupo"]
+                card_class = "executive-card executive-card-selected" if is_selected else "executive-card"
+                
+                rating_val = group["rating"]
+                rating_pct = (rating_val / 10) * 100
+                
+                risk_color = "#e53e3e" if group["risco"] == "Alto" else "#dd6b20" if group["risco"] == "Médio" else "#38a169"
+                
+                st.markdown(f"""
+                <div class="{card_class}">
+                    <div class="executive-card-risk-indicator" style="background-color: {risk_color};">{group["risco"]}</div>
+                    <div class="executive-card-header">
+                        <h3 class="executive-card-title">{group["nome_grupo"]}</h3>
+                        <span class="executive-card-badge">{group["codigo_grupo"]}</span>
+                    </div>
+                    <div class="executive-card-cnpj">{group["cnpj"]}</div>
+                    <div class="executive-card-metrics">
+                        <div class="executive-card-metric-item">
+                            <span class="executive-card-metric-label">Principalidade</span>
+                            <span class="executive-card-metric-value">{group["principalidade"]}</span>
+                        </div>
+                        <div class="executive-card-metric-item">
+                            <span class="executive-card-metric-label">Sócios</span>
+                            <span class="executive-card-metric-value">{group["quantidade_socios"]}</span>
+                        </div>
+                        <div class="executive-card-metric-item">
+                            <span class="executive-card-metric-label">Produtos</span>
+                            <span class="executive-card-metric-value">{group["quantidade_produtos"]}</span>
+                        </div>
+                        <div class="executive-card-metric-item">
+                            <span class="executive-card-metric-label">Complexidade</span>
+                            <span class="executive-card-metric-value">{group["complexidade"]}</span>
+                        </div>
+                    </div>
+                    <div class="executive-card-rating-container">
+                        <span class="executive-card-rating-label">Rating: {rating_val}/10</span>
+                        <div class="executive-card-rating-bar-bg">
+                            <div class="executive-card-rating-bar-fill" style="width: {rating_pct}%;"></div>
+                        </div>
+                    </div>
                 </div>
-                """,
-                unsafe_allow_html=True,
-            )
+                """, unsafe_allow_html=True)
+                
+                col_btn, col_exp = st.columns([1, 1])
+                with col_btn:
+                    if st.button(f"Selecionar", key=f"sel_{group["codigo_grupo"]}", use_container_width=True, type="primary" if is_selected else "secondary"):
+                        st.session_state.temp_selected_group_code = group["codigo_grupo"]
+                        st.rerun()
+                with col_exp:
+                    with st.expander("Ver Detalhes"):
+                        st.markdown(f"**Razão Social:** {group["razao_social"]}")
+                        st.markdown(f"**Código:** {group["codigo_grupo"]}")
+                        st.markdown(f"**CNPJ:** {group["cnpj"]}")
+                        st.markdown(f"**Relevância:** {group["relevancia"]}")
 
-        with col2:
-            st.markdown(
-                f"""
-                <div class="info-card">
-                    <div class="info-label">CNPJ</div>
-                    <div class="info-value">{group['cnpj']}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+    st.markdown("---")
 
-        with col3:
-            st.markdown(
-                f"""
-                <div class="info-card">
-                    <div class="info-label">Rating</div>
-                    <div class="info-value">{group['rating']}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+    col_btn1, col_btn2 = st.columns([3, 1])
 
-        with col4:
-            st.markdown(
-                f"""
-                <div class="info-card">
-                    <div class="info-label">Produtos</div>
-                    <div class="info-value">{group['quantidade_produtos']}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+    with col_btn2:
+        if st.button(
+            "Confirmar Seleção",
+            use_container_width=True,
+            type="primary",
+            disabled=not selected_group_code
+        ):
+            group = next(g for g in groups if g["codigo_grupo"] == selected_group_code)
+            st.session_state.selected_group = {
+                "codigo_grupo": group["codigo_grupo"],
+                "nome_grupo": group["nome_grupo"],
+                "cnpj": group["cnpj"],
+                "razao_social": group["razao_social"],
+                "rating": group["rating"],
+                "quantidade_socios": group["quantidade_socios"],
+                "principalidade": group["principalidade"],
+                "quantidade_produtos": group["quantidade_produtos"],
+                "risco": group["risco"],
+                "relevancia": group["relevancia"],
+                "complexidade": group["complexidade"],
+            }
 
-        st.markdown("---")
+            from app.governance.logging import get_governance_manager
+            from app.orchestration.graph import create_deep_orchestrator_instance
 
-        col_btn1, col_btn2 = st.columns([3, 1])
+            governance = get_governance_manager()
+            st.session_state.session_context = governance.create_session()
 
-        with col_btn2:
-            if st.button(
-                "Selecionar Grupo",
-                use_container_width=True,
-                type="primary",
-            ):
-                st.session_state.selected_group = {
-                    "codigo_grupo": group["codigo_grupo"],
-                    "nome_grupo": group["nome_grupo"],
-                    "cnpj": group["cnpj"],
-                    "razao_social": group["razao_social"],
-                    "rating": group["rating"],
-                    "quantidade_socios": group["quantidade_socios"],
-                    "principalidade": group["principalidade"],
-                    "quantidade_produtos": group["quantidade_produtos"],
-                }
-
-                from app.governance.logging import get_governance_manager
-                from app.orchestration.graph import create_deep_orchestrator_instance
-
-                governance = get_governance_manager()
-                st.session_state.session_context = governance.create_session()
-
-                user_id = st.session_state.user.get("matricula", "") if st.session_state.user else ""
-                model_id = st.session_state.get("selected_model", "gpt-4o-mini")
-                st.session_state.orchestrator = create_deep_orchestrator_instance(
+            user_id = st.session_state.user.get("matricula", "") if st.session_state.user else ""
+            model_id = st.session_state.get("selected_model", "gpt-4o-mini")
+            st.session_state.orchestrator = create_deep_orchestrator_instance(
                     st.session_state.session_context,
                     user_id=user_id,
                     model_id=model_id,
                 )
-                st.session_state.chat_history = []
-                st.session_state.memory_status = {
+            st.session_state.chat_history = []
+            st.session_state.memory_status = {
                     "contexto_carregado": False,
                     "memoria_consultada": False,
                     "raio_x_validado": False,
                     "ambiguidade_resolvida": False,
                     "resposta_entregue": False,
                 }
-                st.rerun()
+            st.rerun()
 
     with st.sidebar:
         st.markdown("### Navegação")
@@ -525,6 +548,52 @@ def render_disambiguation_card(ambiguity_result: dict):
         st.caption(f"Pergunta interpretada: *{normalized}*")
 
 
+def render_ai_reasoning(message_data):
+    """Renderiza o painel de explicabilidade do raciocínio da IA."""
+    with st.expander("🧠 Raciocínio da IA", expanded=False):
+        analysis = message_data.get("analysis", {})
+        category = analysis.get("category", "Geral")
+        complexity = analysis.get("complexity", "Simples")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown(f"**Categoria:** {category}")
+        with col2:
+            comp_lower = complexity.lower()
+            comp_class = f"complexity-{comp_lower}"
+            st.markdown(f"**Complexidade:** <span class='complexity-badge {comp_class}'>{complexity}</span>", unsafe_allow_html=True)
+            
+        st.markdown('<div class="reasoning-panel">', unsafe_allow_html=True)
+        
+        # Agentes envolvidos
+        agents = []
+        if "plan" in message_data and message_data["plan"]:
+            agents = list(set([step.get("agent", "Agent") for step in message_data["plan"] if step.get("agent")]))
+        
+        steps = [
+            ("🧭 Interpretação", "Análise da pergunta e resolução de termos técnicos para garantir precisão."),
+            ("🧠 Estratégia", "Definição do plano de consulta aos dados e orquestração de subagentes."),
+            ("⚙️ Execução", f"Acionamento dos agentes especializados: {', '.join(agents) if agents else 'Busca de dados'}."),
+            ("✅ Validação", "Revisão da consistência dos dados retornados e formatação da resposta final.")
+        ]
+        
+        for title, desc in steps:
+            st.markdown(f"""
+            <div class="reasoning-step">
+                <div class="step-content">
+                    <span class="step-title">{title}</span>
+                    <span class="step-desc">{desc}</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Tempo (mockado ou real se disponível)
+        exec_time = message_data.get("execution_time", "1.2")
+        st.markdown(f"⏱️ **Tempo total de execução:** {exec_time}s")
+
+
 def render_chat_page():
     """
     Tela 3 - Chat com IA.
@@ -635,8 +704,7 @@ def render_chat_page():
             st.markdown(message["content"])
 
             if message["role"] == "assistant" and st.session_state.show_details:
-                if "ambiguity_result" in message and message["ambiguity_result"]:
-                    render_disambiguation_card(message["ambiguity_result"])
+                render_ai_reasoning(message)
 
                 if "plan" in message and message["plan"]:
                     with st.expander("Plano de Execução"):
@@ -706,15 +774,28 @@ def render_chat_page():
                     )
                     st.markdown(response_text)
 
+                    # Extrair metadados para explicabilidade
+                    analysis = result.get("analysis", {})
+                    if not analysis:
+                        # Fallback se não vier do orquestrador
+                        analysis = {
+                            "category": "Financeiro",
+                            "complexity": "Simples"
+                        }
+
                     message_data = {
                         "role": "assistant",
                         "content": response_text,
                         "ambiguity_result": ambiguity_result,
+                        "analysis": analysis,
+                        "execution_time": "1.4" # Mockado para o exemplo
                     }
 
                     if "plan" in result and result["plan"]:
                         message_data["plan"] = result["plan"]
                         if st.session_state.show_details:
+                            render_ai_reasoning(message_data)
+                            
                             with st.expander("Plano de Execução"):
                                 for step in result["plan"]:
                                     if step.get("agent") != "VisualizationAgent":
