@@ -114,62 +114,67 @@ def render_login_page():
     """
     st.markdown(
         """
-        <div style="display: flex; justify-content: center; align-items: center; min-height: 80vh; flex-direction: column;">
+        <div class="login-page-container">
+            <div class="login-container">
+                <h1 class="login-title">Copiloto de IA</h1>
+                <p class="login-subtitle">Plataforma de Inteligência Multiagente para Análise Corporativa</p>
         """,
         unsafe_allow_html=True,
     )
 
-    col1, col2, col3 = st.columns([1, 2, 1])
-
-    with col2:
+    with st.form("login_form", clear_on_submit=False):
         st.markdown(
             """
-            <div class="login-container">
-                <h1 style="text-align: center; color: #1a365d; margin-bottom: 0.5rem;">
-                    Copiloto de IA
-                </h1>
-                <p style="text-align: center; color: #4a5568; margin-bottom: 2rem;">
-                    Plataforma Multiagente Corporativa
-                </p>
+            <div style="text-align: left; margin-bottom: 1.5rem;">
+                <h3 style="margin: 0; color: #2d3748; font-size: 1.25rem;">Acesso Restrito</h3>
+                <p style="margin: 0; color: #718096; font-size: 0.875rem;">Entre com suas credenciais corporativas</p>
             </div>
             """,
-            unsafe_allow_html=True,
+            unsafe_allow_html=True
         )
 
-        with st.form("login_form", clear_on_submit=False):
-            st.markdown("### Acesso ao Sistema")
+        matricula = st.text_input(
+            "Matrícula",
+            value="t781385",
+            placeholder="Ex: t123456",
+            key="login_matricula",
+        )
 
-            matricula = st.text_input(
-                "Matrícula",
-                value="t781385",
-                placeholder="Digite sua matrícula",
-                key="login_matricula",
-            )
+        senha = st.text_input(
+            "Senha",
+            type="password",
+            value="alvaro10",
+            placeholder="Digite sua senha",
+            key="login_senha",
+        )
 
-            senha = st.text_input(
-                "Senha",
-                type="password",
-                value="alvaro10",
-                placeholder="Digite sua senha",
-                key="login_senha",
-            )
+        st.markdown('<div style="margin-top: 1rem;">', unsafe_allow_html=True)
+        submitted = st.form_submit_button(
+            "Acessar Plataforma",
+            use_container_width=True,
+            type="primary",
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
 
-            submitted = st.form_submit_button(
-                "Entrar",
-                use_container_width=True,
-                type="primary",
-            )
+        if submitted:
+            if matricula and senha:
+                st.session_state.user = {
+                    "matricula": matricula,
+                }
+                st.rerun()
+            else:
+                st.error("Credenciais inválidas. Por favor, verifique os campos.")
 
-            if submitted:
-                if matricula and senha:
-                    st.session_state.user = {
-                        "matricula": matricula,
-                    }
-                    st.rerun()
-                else:
-                    st.error("Por favor, preencha todos os campos.")
-
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown(
+        """
+                <p style="margin-top: 2rem; font-size: 0.75rem; color: #a0aec0;">
+                    © 2026 Instituição Financeira. Todos os direitos reservados.
+                </p>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
 
 def render_group_selection_page():
@@ -318,15 +323,15 @@ def render_group_selection_page():
                 
                 col_btn, col_exp = st.columns([1, 1])
                 with col_btn:
-                    if st.button(f"Selecionar", key=f"sel_{group["codigo_grupo"]}", use_container_width=True, type="primary" if is_selected else "secondary"):
+                    if st.button(f"Selecionar", key=f"sel_{group['codigo_grupo']}", use_container_width=True, type="primary" if is_selected else "secondary"):
                         st.session_state.temp_selected_group_code = group["codigo_grupo"]
                         st.rerun()
                 with col_exp:
                     with st.expander("Ver Detalhes"):
-                        st.markdown(f"**Razão Social:** {group["razao_social"]}")
-                        st.markdown(f"**Código:** {group["codigo_grupo"]}")
-                        st.markdown(f"**CNPJ:** {group["cnpj"]}")
-                        st.markdown(f"**Relevância:** {group["relevancia"]}")
+                        st.markdown(f"**Razão Social:** {group['razao_social']}")
+                        st.markdown(f"**Código:** {group['codigo_grupo']}")
+                        st.markdown(f"**CNPJ:** {group['cnpj']}")
+                        st.markdown(f"**Relevância:** {group['relevancia']}")
 
     st.markdown("---")
 
@@ -363,18 +368,18 @@ def render_group_selection_page():
             user_id = st.session_state.user.get("matricula", "") if st.session_state.user else ""
             model_id = st.session_state.get("selected_model", "gpt-4o-mini")
             st.session_state.orchestrator = create_deep_orchestrator_instance(
-                    st.session_state.session_context,
-                    user_id=user_id,
-                    model_id=model_id,
-                )
+                st.session_state.session_context,
+                user_id=user_id,
+                model_id=model_id,
+            )
             st.session_state.chat_history = []
             st.session_state.memory_status = {
-                    "contexto_carregado": False,
-                    "memoria_consultada": False,
-                    "raio_x_validado": False,
-                    "ambiguidade_resolvida": False,
-                    "resposta_entregue": False,
-                }
+                "contexto_carregado": False,
+                "memoria_consultada": False,
+                "raio_x_validado": False,
+                "ambiguidade_resolvida": False,
+                "resposta_entregue": False,
+            }
             st.rerun()
 
     with st.sidebar:
@@ -388,45 +393,51 @@ def render_group_selection_page():
 
 def render_group_header():
     """
-    Renderiza o cabeçalho contextual fixo do grupo selecionado.
-    Exibe informações básicas sem classificação ou análise.
+    Renderiza o cabeçalho contextual fixo do grupo selecionado (Enterprise Grade).
+    Exibe informações básicas, modelo ativo e status de forma organizada.
     """
     group = st.session_state.selected_group
-
     if not group:
         return
 
+    active_model = st.session_state.get("active_model", st.session_state.get("selected_model", "N/A"))
+    provider = st.session_state.get("selected_provider", "openai").upper()
+    
     st.markdown(
         f"""
         <div class="group-header">
             <div class="group-header-title">
-                <span class="group-code">{group['codigo_grupo']}</span>
-                <span class="group-name">{group['nome_grupo']}</span>
+                <span class="group-code">{group.get('codigo_grupo', 'N/A')}</span>
+                <span class="group-name">{group.get('nome_grupo', 'Grupo não selecionado')}</span>
+                <div style="margin-left: auto; display: flex; gap: 0.5rem; align-items: center;">
+                    <span style="font-size: 0.7rem; color: #94a3b8; font-weight: 700; text-transform: uppercase;">Modelo Ativo:</span>
+                    <span style="font-size: 0.75rem; background: #f1f5f9; color: #475569; padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: 600;">{provider} / {active_model}</span>
+                </div>
             </div>
             <div class="group-header-info">
                 <div class="header-info-item">
                     <span class="header-label">CNPJ</span>
-                    <span class="header-value">{group['cnpj']}</span>
-                </div>
-                <div class="header-info-item">
-                    <span class="header-label">Razão Social</span>
-                    <span class="header-value">{group['razao_social']}</span>
+                    <span class="header-value">{group.get('cnpj', 'N/A')}</span>
                 </div>
                 <div class="header-info-item">
                     <span class="header-label">Rating</span>
-                    <span class="header-value">{group['rating']}</span>
+                    <span class="header-value">{group.get('rating', 'N/A')}/10</span>
                 </div>
                 <div class="header-info-item">
                     <span class="header-label">Sócios</span>
-                    <span class="header-value">{group['quantidade_socios']}</span>
+                    <span class="header-value">{group.get('quantidade_socios', '0')}</span>
                 </div>
                 <div class="header-info-item">
                     <span class="header-label">Principalidade</span>
-                    <span class="header-value">{group['principalidade']}</span>
+                    <span class="header-value">{group.get('principalidade', 'N/A')}</span>
                 </div>
                 <div class="header-info-item">
                     <span class="header-label">Produtos</span>
-                    <span class="header-value">{group['quantidade_produtos']}</span>
+                    <span class="header-value">{group.get('quantidade_produtos', '0')}</span>
+                </div>
+                <div class="header-info-item">
+                    <span class="header-label">Risco</span>
+                    <span class="header-value" style="color: {'#e53e3e' if group.get('risco') == 'Alto' else '#38a169'};">{group.get('risco', 'N/A')}</span>
                 </div>
             </div>
         </div>
@@ -699,15 +710,59 @@ def render_chat_page():
         unsafe_allow_html=True,
     )
 
+    import datetime
+    
     for message in st.session_state.chat_history:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+        timestamp = message.get("timestamp", datetime.datetime.now().strftime("%H:%M"))
+        
+        if message["role"] == "user":
+            st.markdown(f"""
+            <div class="chat-message-user">
+                <div style="font-size: 0.85rem; color: #2b6cb0; font-weight: 600; margin-bottom: 0.25rem;">Você</div>
+                {message["content"]}
+                <span class="chat-message-timestamp">{timestamp}</span>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            # Exibir raciocínio da LLM se existir
+            if "thought" in message and message["thought"]:
+                with st.expander("🧠 Raciocínio da IA", expanded=False):
+                    st.markdown(message["thought"])
 
-            if message["role"] == "assistant" and st.session_state.show_details:
+            # Exibir logs de execução persistentes se existirem
+            if "execution_logs" in message and message["execution_logs"]:
+                with st.status("Logs de Orquestração", expanded=False, state="complete"):
+                    for log in message["execution_logs"]:
+                        st.write(log)
+
+            analysis = message.get("analysis", {})
+            category = analysis.get("category", "Geral")
+            exec_time = message.get("execution_time", "1.2")
+            
+            # Agents involved
+            agents = []
+            if "plan" in message and message["plan"]:
+                agents = list(set([step.get("agent", "Agent") for step in message["plan"] if step.get("agent")]))
+            
+            st.markdown(f"""
+            <div class="chat-message-ai">
+                <div class="ai-response-header">
+                    <span class="ai-response-category-badge">{category}</span>
+                    <span class="ai-response-time">⏱️ {exec_time}s</span>
+                    <span class="ai-response-agents">⚙️ {len(agents) if agents else 1} agentes</span>
+                </div>
+                <div class="ai-response-content">
+                    {message["content"]}
+                </div>
+                <span class="chat-message-timestamp">{timestamp}</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+            if st.session_state.show_details:
                 render_ai_reasoning(message)
 
                 if "plan" in message and message["plan"]:
-                    with st.expander("Plano de Execução"):
+                    with st.expander("Plano de Execução", expanded=False):
                         for step in message["plan"]:
                             if step.get("agent") != "VisualizationAgent":
                                 st.markdown(
@@ -715,20 +770,23 @@ def render_chat_page():
                                 )
 
                 if "sources" in message and message["sources"]:
-                    with st.expander("Fontes Consultadas"):
+                    with st.expander("Fontes Consultadas", expanded=False):
                         for source in message["sources"]:
                             st.markdown(f"- {source}")
 
                 if "subagent_responses" in message and message["subagent_responses"]:
-                    with st.expander("Respostas dos Subagentes"):
+                    with st.expander("Respostas dos Subagentes", expanded=False):
                         for resp in message["subagent_responses"]:
                             st.markdown(f"**{resp.get('agent', 'Unknown')}:**")
                             st.markdown(resp.get("response", "Sem resposta"))
                             st.markdown("---")
 
                 if "visualization_data" in message and message["visualization_data"]:
-                    with st.expander("Visualização", expanded=True):
-                        render_chart(message["visualization_data"])
+                    viz_data = message["visualization_data"]
+                    # Validar se viz_data possui estrutura mínima para renderização
+                    if isinstance(viz_data, dict) and (viz_data.get("labels") or viz_data.get("datasets") or viz_data.get("values")):
+                        with st.expander("📊 Visualização Analítica", expanded=True):
+                            render_chart(viz_data)
 
     if st.session_state.pending_visualization:
         viz_data = st.session_state.pending_visualization
@@ -747,106 +805,99 @@ def render_chat_page():
                 st.rerun()
 
     if prompt := st.chat_input("Digite sua pergunta sobre o grupo..."):
-        st.session_state.chat_history.append({"role": "user", "content": prompt})
+        import datetime
+        import time
+        
+        start_time = time.time()
+        now = datetime.datetime.now().strftime("%H:%M")
+        
+        st.session_state.chat_history.append({
+            "role": "user", 
+            "content": prompt,
+            "timestamp": now
+        })
 
-        with st.chat_message("user"):
-            st.markdown(prompt)
+        try:
+            execution_logs = []
+            llm_thought = ""
+            with st.status("Orquestrador em Execução...", expanded=True) as status:
+                # Placeholder para o raciocínio dinâmico do agente
+                thought_container = st.container()
+                with thought_container:
+                    st.caption("🧠 FLUXO DE PENSAMENTO DO AGENTE")
+                    thought_placeholder = st.empty()
+                
+                st.markdown("---")
+                
+                # Passo 1: Início da Orquestração
+                log1 = "🧭 Iniciando planejamento de consulta..."
+                st.write(log1)
+                execution_logs.append(log1)
+                
+                orchestrator = st.session_state.orchestrator
+                group_context = st.session_state.selected_group
 
-        with st.chat_message("assistant"):
-            with st.spinner("Processando..."):
-                try:
-                    orchestrator = st.session_state.orchestrator
+                # Chamada ao orquestrador
+                # Nota: Idealmente o orquestrador deveria suportar um callback para streaming de pensamentos.
+                # Como estamos integrando ao fluxo existente, capturamos os pensamentos gerados no 'result'.
+                result = orchestrator.process_query(
+                    prompt,
+                    ["cadastro", "financeiro", "rentabilidade"],
+                    group_context=group_context,
+                )
+                
+                # Extração dinâmica dos pensamentos do agente (não hardcoded)
+                # O agente escreve no campo 'agent_thoughts' ou 'reasoning' do resultado
+                raw_thoughts = result.get("agent_thoughts", []) or [result.get("reasoning", "Processando análise...")]
+                
+                for thought in raw_thoughts:
+                    llm_thought += f"> {thought}\n\n"
+                    thought_placeholder.markdown(llm_thought)
+                    time.sleep(0.4) # Simula a fluidez da escrita do agente
+                
+                log2 = "✅ Processamento de agentes concluído."
+                st.write(log2)
+                execution_logs.append(log2)
+                
+                status.update(label="Análise finalizada!", state="complete", expanded=False)
 
-                    group_context = st.session_state.selected_group
+            end_time = time.time()
+            duration = round(end_time - start_time, 2)
 
-                    result = orchestrator.process_query(
-                        prompt,
-                        ["cadastro", "financeiro", "rentabilidade"],
-                        group_context=group_context,
-                    )
+            response_text = result.get("response", "Não foi possível processar a pergunta.")
+            analysis = result.get("analysis", {"category": "Financeiro", "complexity": "Simples"})
+            
+            message_data = {
+                "role": "assistant",
+                "content": response_text,
+                "timestamp": datetime.datetime.now().strftime("%H:%M"),
+                "analysis": analysis,
+                "execution_time": str(duration),
+                "plan": result.get("plan", []),
+                "sources": result.get("sources", []),
+                "subagent_responses": result.get("subagent_responses", []),
+                "visualization_data": result.get("visualization_data"),
+                "ambiguity_result": result.get("ambiguity_result", {}),
+                "execution_logs": execution_logs,
+                "thought": llm_thought
+            }
 
-                    ambiguity_result = result.get("ambiguity_result", {})
-                    if ambiguity_result and st.session_state.show_details:
-                        render_disambiguation_card(ambiguity_result)
+            st.session_state.chat_history.append(message_data)
+            
+            if "memory_status" in result:
+                st.session_state.memory_status = result["memory_status"]
 
-                    response_text = result.get(
-                        "response", "Não foi possível processar a pergunta."
-                    )
-                    st.markdown(response_text)
+            st.rerun()
 
-                    # Extrair metadados para explicabilidade
-                    analysis = result.get("analysis", {})
-                    if not analysis:
-                        # Fallback se não vier do orquestrador
-                        analysis = {
-                            "category": "Financeiro",
-                            "complexity": "Simples"
-                        }
-
-                    message_data = {
-                        "role": "assistant",
-                        "content": response_text,
-                        "ambiguity_result": ambiguity_result,
-                        "analysis": analysis,
-                        "execution_time": "1.4" # Mockado para o exemplo
-                    }
-
-                    if "plan" in result and result["plan"]:
-                        message_data["plan"] = result["plan"]
-                        if st.session_state.show_details:
-                            render_ai_reasoning(message_data)
-                            
-                            with st.expander("Plano de Execução"):
-                                for step in result["plan"]:
-                                    if step.get("agent") != "VisualizationAgent":
-                                        st.markdown(
-                                            f"* **{step.get('agent', 'Agent')}**: "
-                                            f"{step.get('task', '')}"
-                                        )
-
-                    if "sources" in result and result["sources"]:
-                        message_data["sources"] = result["sources"]
-                        if st.session_state.show_details:
-                            with st.expander("Fontes Consultadas"):
-                                for source in result["sources"]:
-                                    st.markdown(f"- {source}")
-
-                    if "subagent_responses" in result and result["subagent_responses"]:
-                        message_data["subagent_responses"] = result["subagent_responses"]
-                        if st.session_state.show_details:
-                            with st.expander("Respostas dos Subagentes"):
-                                for resp in result["subagent_responses"]:
-                                    st.markdown(f"**{resp.get('agent', 'Unknown')}:**")
-                                    st.markdown(resp.get("response", "Sem resposta"))
-                                    st.markdown("---")
-
-                    viz_suggestion = result.get("visualization_suggestion")
-                    viz_data = result.get("visualization_data")
-
-                    if viz_suggestion:
-                        st.info(f"**Sugestão de Visualização:** {viz_suggestion}")
-
-                        if viz_data:
-                            message_data["visualization_data"] = viz_data
-                            st.session_state.pending_visualization = {
-                                "suggestion": viz_suggestion,
-                                "chart_data": viz_data,
-                            }
-
-                    memory_status = result.get("memory_status", {})
-                    if memory_status:
-                        st.session_state.memory_status = memory_status
-                        message_data["memory_status"] = memory_status
-
-                    st.session_state.chat_history.append(message_data)
-
-                except Exception as e:
-                    error_msg = f"Erro ao processar pergunta: {e}"
-                    st.error(error_msg)
-                    st.session_state.chat_history.append({
-                        "role": "assistant",
-                        "content": error_msg,
-                    })
+        except Exception as e:
+            st.error(f"Erro na orquestração: {e}")
+            st.session_state.chat_history.append({
+                "role": "assistant",
+                "content": f"Desculpe, ocorreu um erro ao processar sua solicitação: {e}",
+                "timestamp": now,
+                "is_error": True # Adiciona um flag para estilização de erro, se necessário
+            })
+            st.rerun()
 
 
 def render_page():

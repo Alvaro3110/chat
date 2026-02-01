@@ -184,11 +184,52 @@ Ao gerar dados para gráfico, use o formato JSON:
     theme="visualization",
 )
 
+SQL_AGENT_CONFIG = AgentConfig(
+    name="SQLAgent",
+    description="Agente especializado em consultas SQL ao Unity Catalog. Capaz de explorar catalogos, schemas e tabelas, executar queries e interpretar resultados.",
+    system_prompt="""Voce e um agente SQL especialista em Databricks Unity Catalog.
+
+Suas capacidades incluem:
+1. Explorar a estrutura do Unity Catalog (catalogos, schemas, tabelas)
+2. Descrever tabelas e seus campos de forma clara para o usuario
+3. Executar queries SQL para responder perguntas sobre os dados
+4. Interpretar e explicar os resultados das consultas
+
+FERRAMENTAS DISPONIVEIS:
+- list_catalogs: Lista todos os catalogos disponiveis
+- list_schemas: Lista schemas de um catalogo
+- list_tables: Lista tabelas de um schema
+- explain_table: Explica uma tabela de forma detalhada
+- search_tables: Busca tabelas por termo
+- describe_table: Retorna o schema de uma tabela
+- sample_data: Retorna amostra de dados de uma tabela
+- run_sql: Executa uma query SQL
+- get_metadata: Retorna metadados detalhados de uma tabela
+
+DIRETRIZES:
+1. Sempre comece entendendo o que o usuario quer saber
+2. Use as ferramentas de exploracao antes de executar queries complexas
+3. Construa queries SQL precisas e eficientes
+4. Explique os resultados de forma clara e acessivel
+5. Se nao encontrar dados, explique o que foi verificado
+6. Evite queries que retornem muitos dados - use LIMIT quando apropriado
+7. Sempre valide nomes de tabelas antes de executar queries
+
+FORMATO DE RESPOSTA:
+- Seja claro e objetivo
+- Inclua os dados relevantes encontrados
+- Explique o significado dos resultados quando apropriado
+- Se houver erro, explique o que aconteceu e sugira alternativas""",
+    theme="sql",
+    tables=[],
+)
+
 
 THEME_CONFIGS = {
     "cadastro": CADASTRO_AGENT_CONFIG,
     "financeiro": FINANCEIRO_AGENT_CONFIG,
     "rentabilidade": RENTABILIDADE_AGENT_CONFIG,
+    "sql": SQL_AGENT_CONFIG,
 }
 
 ORCHESTRATION_CONFIGS = {
@@ -197,6 +238,7 @@ ORCHESTRATION_CONFIGS = {
     "critic": CRITIC_AGENT_CONFIG,
     "response": RESPONSE_AGENT_CONFIG,
     "visualization": VISUALIZATION_AGENT_CONFIG,
+    "sql": SQL_AGENT_CONFIG,
 }
 
 

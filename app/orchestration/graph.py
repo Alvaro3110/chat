@@ -21,9 +21,14 @@ from app.governance.logging import SessionContext
 from app.memory.memory_agent import MemoryAgent, create_memory_agent
 from app.tools.databricks_tools import (
     describe_table,
+    explain_table,
     get_metadata,
+    list_catalogs,
+    list_schemas,
+    list_tables,
     run_sql,
     sample_data,
+    search_tables,
 )
 
 logger = logging.getLogger(__name__)
@@ -102,7 +107,17 @@ class AgentState(TypedDict):
     memory_status: dict[str, bool]
 
 
-DATABRICKS_TOOLS = [describe_table, sample_data, run_sql, get_metadata]
+DATABRICKS_TOOLS = [
+    describe_table,
+    sample_data,
+    run_sql,
+    get_metadata,
+    list_catalogs,
+    list_schemas,
+    list_tables,
+    explain_table,
+    search_tables,
+]
 
 VISUALIZATION_KEYWORDS = [
     "gráfico", "grafico", "chart", "visualização", "visualizacao",
@@ -284,8 +299,15 @@ Agentes disponíveis:
 - CadastroAgent: dados cadastrais do cliente
 - FinanceiroAgent: dados financeiros e transações
 - RentabilidadeAgent: métricas de rentabilidade
+- SQLAgent: consultas SQL ao Unity Catalog, exploracao de schemas e tabelas
 - ReportAgent: consolidação e relatório final
-- VisualizationAgent: gráficos (somente se solicitado)"""
+- VisualizationAgent: gráficos (somente se solicitado)
+
+IMPORTANTE: Use SQLAgent quando o usuario quiser:
+- Explorar a estrutura do catalogo (listar catalogos, schemas, tabelas)
+- Entender o schema de uma tabela especifica
+- Executar consultas SQL personalizadas
+- Buscar tabelas por nome ou descricao"""
 
         print(f"[NODE] Prompt length: {len(prompt)}")
 
