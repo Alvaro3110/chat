@@ -122,21 +122,39 @@ DATABRICKS_TOOLS = [
 VISUALIZATION_KEYWORDS = [
     "gráfico", "grafico", "chart", "visualização", "visualizacao",
     "plot", "plotar", "desenhar", "mostrar gráfico", "exibir gráfico",
-    "barras", "pizza", "linha", "dispersão", "histograma"
+    "barras", "pizza", "linha", "dispersão", "histograma",
+    "evolução", "evolucao", "tendência", "tendencia", "comparar",
+    "comparação", "comparacao", "distribuição", "distribuicao",
+    "ao longo", "mensal", "trimestral", "série temporal", "serie temporal"
 ]
 
 
 def check_visualization_requested(query: str, plan: list[dict[str, Any]]) -> bool:
     """Verifica se visualização foi solicitada na pergunta ou no plano."""
     query_lower = query.lower()
-    for keyword in VISUALIZATION_KEYWORDS:
-        if keyword in query_lower:
-            return True
+
+    explicit_visual_request = any(keyword in query_lower for keyword in VISUALIZATION_KEYWORDS)
+
+    analytical_patterns = [
+        ("por mês", "mensal"),
+        ("por trimestre", "trimestral"),
+        ("ao longo", "tempo"),
+        ("entre", " e "),
+        ("compar", ""),
+        ("top ", ""),
+    ]
+    analytical_request = any(
+        left in query_lower and (not right or right in query_lower)
+        for left, right in analytical_patterns
+    )
+
+    if explicit_visual_request or analytical_request:
+        return True
 
     for step in plan:
         agent = step.get("agent", "").lower()
         task = step.get("task", "").lower()
-        if "visualization" in agent or "visualização" in task:
+        if "visualization" in agent or "visualização" in task or "graf" in task:
             return True
 
     return False
@@ -318,6 +336,23 @@ IMPORTANTE: Use SQLAgent quando o usuario quiser:
 
         plan_data = safe_parse_json(content)
         plan = plan_data.get("steps", []) if plan_data else []
+
+        if not plan:
+            domain_to_agent = {
+                "cadastro": "CadastroAgent",
+                "financeiro": "FinanceiroAgent",
+                "rentabilidade": "RentabilidadeAgent",
+            }
+            fallback_domains = state.get("active_domains", []) or ["financeiro"]
+            plan = [
+                {
+                    "agent": domain_to_agent.get(domain, "FinanceiroAgent"),
+                    "task": f"Analisar dados do domínio {domain} para responder: {state['normalized_query'] or state['original_query']}",
+                    "priority": idx + 1,
+                }
+                for idx, domain in enumerate(fallback_domains)
+            ]
+            print(f"[NODE] Planner fallback activated with {len(plan)} step(s)")
 
         visualization_requested = check_visualization_requested(
             state["normalized_query"],
@@ -707,15 +742,48 @@ class DeepAgentOrchestrator:
         print("PIPELINE COMPLETED")
         print("=" * 60)
 
+        plan = result.get("plan", []) or []
+        validation = result.get("validation", {}) or {}
+        subagent_responses = result.get("subagent_responses", []) or []
+
+        complexity_map = {0: "Simples", 1: "Moderada", 2: "Complexa"}
+        complexity_idx = 0 if len(plan) <= 1 else 1 if len(plan) <= 3 else 2
+        complexity = complexity_map.get(complexity_idx, "Moderada")
+
+        category = "Geral"
+        normalized = (result.get("normalized_query", "") or "").lower()
+        if any(term in normalized for term in ["cadastro", "cnpj", "sócio", "socio"]):
+            category = "Cadastro"
+        elif any(term in normalized for term in ["rentabilidade", "margem", "roi", "lucro"]):
+            category = "Rentabilidade"
+        elif any(term in normalized for term in ["finance", "saldo", "receita", "faturamento", "crédito", "credito"]):
+            category = "Financeiro"
+
+        critic_summary = validation.get("summary", "Validação concluída")
+        agent_thoughts = [
+            f"Pergunta normalizada: {result.get('normalized_query', query)}",
+            f"Plano montado com {len(plan)} etapa(s)",
+            f"Subagentes executados: {len(subagent_responses)}",
+            f"Validação do crítico: {critic_summary}",
+        ]
+
         return {
             "response": result.get("final_response", ""),
             "normalized_query": result.get("normalized_query", ""),
             "final_report": result.get("final_report", ""),
-            "validation": result.get("validation", {}),
+            "validation": validation,
+            "analysis": {
+                "category": category,
+                "complexity": complexity,
+            },
+            "plan": plan,
+            "subagent_responses": subagent_responses,
+            "ambiguity_result": result.get("ambiguity_result", {}),
             "memory_status": result.get("memory_status", {}),
             "sources": result.get("sources", []),
             "visualization_suggestion": result.get("visualization_suggestion"),
             "visualization_data": result.get("visualization_data"),
+            "agent_thoughts": agent_thoughts,
         }
 
 
