@@ -337,6 +337,23 @@ IMPORTANTE: Use SQLAgent quando o usuario quiser:
         plan_data = safe_parse_json(content)
         plan = plan_data.get("steps", []) if plan_data else []
 
+        if not plan:
+            domain_to_agent = {
+                "cadastro": "CadastroAgent",
+                "financeiro": "FinanceiroAgent",
+                "rentabilidade": "RentabilidadeAgent",
+            }
+            fallback_domains = state.get("active_domains", []) or ["financeiro"]
+            plan = [
+                {
+                    "agent": domain_to_agent.get(domain, "FinanceiroAgent"),
+                    "task": f"Analisar dados do domínio {domain} para responder: {state['normalized_query'] or state['original_query']}",
+                    "priority": idx + 1,
+                }
+                for idx, domain in enumerate(fallback_domains)
+            ]
+            print(f"[NODE] Planner fallback activated with {len(plan)} step(s)")
+
         visualization_requested = check_visualization_requested(
             state["normalized_query"],
             plan
@@ -725,15 +742,48 @@ class DeepAgentOrchestrator:
         print("PIPELINE COMPLETED")
         print("=" * 60)
 
+        plan = result.get("plan", []) or []
+        validation = result.get("validation", {}) or {}
+        subagent_responses = result.get("subagent_responses", []) or []
+
+        complexity_map = {0: "Simples", 1: "Moderada", 2: "Complexa"}
+        complexity_idx = 0 if len(plan) <= 1 else 1 if len(plan) <= 3 else 2
+        complexity = complexity_map.get(complexity_idx, "Moderada")
+
+        category = "Geral"
+        normalized = (result.get("normalized_query", "") or "").lower()
+        if any(term in normalized for term in ["cadastro", "cnpj", "sócio", "socio"]):
+            category = "Cadastro"
+        elif any(term in normalized for term in ["rentabilidade", "margem", "roi", "lucro"]):
+            category = "Rentabilidade"
+        elif any(term in normalized for term in ["finance", "saldo", "receita", "faturamento", "crédito", "credito"]):
+            category = "Financeiro"
+
+        critic_summary = validation.get("summary", "Validação concluída")
+        agent_thoughts = [
+            f"Pergunta normalizada: {result.get('normalized_query', query)}",
+            f"Plano montado com {len(plan)} etapa(s)",
+            f"Subagentes executados: {len(subagent_responses)}",
+            f"Validação do crítico: {critic_summary}",
+        ]
+
         return {
             "response": result.get("final_response", ""),
             "normalized_query": result.get("normalized_query", ""),
             "final_report": result.get("final_report", ""),
-            "validation": result.get("validation", {}),
+            "validation": validation,
+            "analysis": {
+                "category": category,
+                "complexity": complexity,
+            },
+            "plan": plan,
+            "subagent_responses": subagent_responses,
+            "ambiguity_result": result.get("ambiguity_result", {}),
             "memory_status": result.get("memory_status", {}),
             "sources": result.get("sources", []),
             "visualization_suggestion": result.get("visualization_suggestion"),
             "visualization_data": result.get("visualization_data"),
+            "agent_thoughts": agent_thoughts,
         }
 
 
