@@ -124,6 +124,30 @@ CUSTOM_CSS = """
         outline: none;
     }
 
+
+    .selection-toolbar {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        padding: 0.75rem 1rem;
+        margin: 0.5rem 0 1rem 0;
+        color: #475569;
+        font-size: 0.92rem;
+    }
+
+    div[data-testid="stChatInput"] {
+        border-top: 1px solid #e2e8f0;
+        padding-top: 0.75rem;
+        margin-top: 1rem;
+        background: linear-gradient(180deg, rgba(240,242,246,0.2) 0%, rgba(240,242,246,0.9) 55%, rgba(240,242,246,1) 100%);
+    }
+
+    div[data-testid="stChatInput"] textarea {
+        border-radius: 12px !important;
+        border: 1px solid #cbd5e0 !important;
+        background-color: #ffffff !important;
+    }
+
     /* Executive Group Cards */
     .executive-card {
         background-color: #ffffff;
@@ -328,6 +352,22 @@ CUSTOM_CSS = """
         margin-bottom: 1rem;
         box-shadow: 0 1px 3px rgba(0,0,0,0.08);
         border-bottom-right-radius: 2px;
+    }
+
+
+
+    .thought-trace {
+        background: #f8fafc;
+        border: 1px solid #dbeafe;
+        border-left: 4px solid #3b82f6;
+        border-radius: 10px;
+        padding: 0.75rem 1rem;
+        margin: 0.5rem 0 0.75rem 0;
+    }
+
+    .thought-trace p {
+        margin-bottom: 0.4rem;
+        color: #1e3a8a;
     }
 
     .chat-message-ai {

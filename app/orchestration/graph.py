@@ -122,21 +122,39 @@ DATABRICKS_TOOLS = [
 VISUALIZATION_KEYWORDS = [
     "gráfico", "grafico", "chart", "visualização", "visualizacao",
     "plot", "plotar", "desenhar", "mostrar gráfico", "exibir gráfico",
-    "barras", "pizza", "linha", "dispersão", "histograma"
+    "barras", "pizza", "linha", "dispersão", "histograma",
+    "evolução", "evolucao", "tendência", "tendencia", "comparar",
+    "comparação", "comparacao", "distribuição", "distribuicao",
+    "ao longo", "mensal", "trimestral", "série temporal", "serie temporal"
 ]
 
 
 def check_visualization_requested(query: str, plan: list[dict[str, Any]]) -> bool:
     """Verifica se visualização foi solicitada na pergunta ou no plano."""
     query_lower = query.lower()
-    for keyword in VISUALIZATION_KEYWORDS:
-        if keyword in query_lower:
-            return True
+
+    explicit_visual_request = any(keyword in query_lower for keyword in VISUALIZATION_KEYWORDS)
+
+    analytical_patterns = [
+        ("por mês", "mensal"),
+        ("por trimestre", "trimestral"),
+        ("ao longo", "tempo"),
+        ("entre", " e "),
+        ("compar", ""),
+        ("top ", ""),
+    ]
+    analytical_request = any(
+        left in query_lower and (not right or right in query_lower)
+        for left, right in analytical_patterns
+    )
+
+    if explicit_visual_request or analytical_request:
+        return True
 
     for step in plan:
         agent = step.get("agent", "").lower()
         task = step.get("task", "").lower()
-        if "visualization" in agent or "visualização" in task:
+        if "visualization" in agent or "visualização" in task or "graf" in task:
             return True
 
     return False
