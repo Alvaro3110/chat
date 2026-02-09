@@ -118,20 +118,6 @@ def init_session_state():
         st.session_state.group_risk_filter = ["Baixo", "Médio", "Alto"]
 
 
-def _question_requests_visualization(question: str) -> bool:
-    """Determina se a pergunta pede análise visual (gráfico) explicitamente ou por padrão analítico."""
-    if not question:
-        return False
-
-    question_lower = question.lower()
-    keywords = [
-        "gráfico", "grafico", "chart", "visualização", "visualizacao", "plot",
-        "tendência", "tendencia", "evolução", "evolucao", "comparação", "comparacao",
-        "distribuição", "distribuicao", "por mês", "por trimestre", "ao longo",
-    ]
-    return any(term in question_lower for term in keywords)
-
-
 def _filter_and_sort_groups(groups):
     """Filtra e ordena grupos para melhorar a descoberta pelo usuário."""
     search_term = st.session_state.get("group_search_term", "").strip().lower()
@@ -183,7 +169,6 @@ def _process_prompt(prompt: str):
 
     execution_logs = []
     llm_thought = ""
-    thought_steps = []
     with st.status("Orquestrador em Execução...", expanded=True) as status:
         thought_container = st.container()
         with thought_container:
@@ -208,7 +193,6 @@ def _process_prompt(prompt: str):
         raw_thoughts = result.get("agent_thoughts", []) or [result.get("reasoning", "Processando análise...")]
 
         for thought in raw_thoughts:
-            thought_steps.append(thought)
             llm_thought += f"> {thought}\n\n"
             thought_placeholder.markdown(llm_thought)
             time.sleep(0.4)
@@ -223,9 +207,6 @@ def _process_prompt(prompt: str):
     response_text = result.get("response", "Não foi possível processar a pergunta.")
     analysis = result.get("analysis", {"category": "Financeiro", "complexity": "Simples"})
 
-    visualization_data = result.get("visualization_data")
-    visualization_suggestion = result.get("visualization_suggestion")
-
     message_data = {
         "role": "assistant",
         "content": response_text,
@@ -235,19 +216,11 @@ def _process_prompt(prompt: str):
         "plan": result.get("plan", []),
         "sources": result.get("sources", []),
         "subagent_responses": result.get("subagent_responses", []),
-        "visualization_data": visualization_data,
-        "visualization_suggestion": visualization_suggestion,
+        "visualization_data": result.get("visualization_data"),
         "ambiguity_result": result.get("ambiguity_result", {}),
         "execution_logs": execution_logs,
         "thought": llm_thought,
-        "thought_steps": thought_steps,
     }
-
-    if visualization_data and not _question_requests_visualization(prompt):
-        st.session_state.pending_visualization = {
-            "suggestion": visualization_suggestion or "Posso gerar um gráfico para complementar esta resposta.",
-            "chart_data": visualization_data,
-        }
 
     st.session_state.chat_history.append(message_data)
 
