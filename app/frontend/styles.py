@@ -354,6 +354,22 @@ CUSTOM_CSS = """
         border-bottom-right-radius: 2px;
     }
 
+
+
+    .thought-trace {
+        background: #f8fafc;
+        border: 1px solid #dbeafe;
+        border-left: 4px solid #3b82f6;
+        border-radius: 10px;
+        padding: 0.75rem 1rem;
+        margin: 0.5rem 0 0.75rem 0;
+    }
+
+    .thought-trace p {
+        margin-bottom: 0.4rem;
+        color: #1e3a8a;
+    }
+
     .chat-message-ai {
         background-color: #f7fafc;
         border-radius: 12px;

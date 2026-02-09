@@ -896,10 +896,17 @@ def render_chat_page():
             </div>
             """, unsafe_allow_html=True)
         else:
-            # Exibir raciocínio da LLM se existir
+            # Exibir raciocínio da LLM de forma persistente e visível
             if "thought" in message and message["thought"]:
-                with st.expander("🧠 Raciocínio da IA", expanded=False):
+                st.markdown('<div class="thought-trace">', unsafe_allow_html=True)
+                st.markdown("**🧠 Pensamento do agente (persistente)**")
+                thought_steps = message.get("thought_steps", [])
+                if thought_steps:
+                    for idx, thought_step in enumerate(thought_steps, start=1):
+                        st.markdown(f"{idx}. {thought_step}")
+                else:
                     st.markdown(message["thought"])
+                st.markdown('</div>', unsafe_allow_html=True)
 
             # Exibir logs de execução persistentes se existirem
             if "execution_logs" in message and message["execution_logs"]:
@@ -930,6 +937,13 @@ def render_chat_page():
             </div>
             """, unsafe_allow_html=True)
 
+            if "visualization_data" in message and message["visualization_data"]:
+                viz_data = message["visualization_data"]
+                # Validar se viz_data possui estrutura mínima para renderização
+                if isinstance(viz_data, dict) and (viz_data.get("labels") or viz_data.get("datasets") or viz_data.get("values")):
+                    with st.expander("📊 Visualização Analítica", expanded=True):
+                        render_chart(viz_data)
+
             if st.session_state.show_details:
                 render_ai_reasoning(message)
 
@@ -952,13 +966,6 @@ def render_chat_page():
                             st.markdown(f"**{resp.get('agent', 'Unknown')}:**")
                             st.markdown(resp.get("response", "Sem resposta"))
                             st.markdown("---")
-
-                if "visualization_data" in message and message["visualization_data"]:
-                    viz_data = message["visualization_data"]
-                    # Validar se viz_data possui estrutura mínima para renderização
-                    if isinstance(viz_data, dict) and (viz_data.get("labels") or viz_data.get("datasets") or viz_data.get("values")):
-                        with st.expander("📊 Visualização Analítica", expanded=True):
-                            render_chart(viz_data)
 
     if st.session_state.pending_visualization:
         viz_data = st.session_state.pending_visualization
