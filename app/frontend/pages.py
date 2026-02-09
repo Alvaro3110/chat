@@ -63,6 +63,12 @@ SAMPLE_GROUPS = [
     },
 ]
 
+QUICK_PROMPTS = [
+    "Quais os principais riscos de crédito deste grupo nos próximos 12 meses?",
+    "Resuma a saúde financeira com pontos de atenção para o comitê.",
+    "Quais oportunidades comerciais têm maior potencial de receita?",
+]
+
 
 def init_session_state():
     """Inicializa o estado da sessão com todas as variáveis necessárias."""
@@ -104,6 +110,124 @@ def init_session_state():
 
     if "selected_provider" not in st.session_state:
         st.session_state.selected_provider = "openai"
+
+    if "group_search_term" not in st.session_state:
+        st.session_state.group_search_term = ""
+
+    if "group_risk_filter" not in st.session_state:
+        st.session_state.group_risk_filter = ["Baixo", "Médio", "Alto"]
+
+
+def _filter_and_sort_groups(groups):
+    """Filtra e ordena grupos para melhorar a descoberta pelo usuário."""
+    search_term = st.session_state.get("group_search_term", "").strip().lower()
+    selected_risks = st.session_state.get("group_risk_filter", ["Baixo", "Médio", "Alto"])
+    sort_option = st.session_state.get("group_sort_option", "Maior rating")
+
+    filtered = []
+    for group in groups:
+        searchable_content = " ".join(
+            [
+                group.get("nome_grupo", ""),
+                group.get("codigo_grupo", ""),
+                group.get("cnpj", ""),
+                group.get("principalidade", ""),
+            ]
+        ).lower()
+
+        matches_search = not search_term or search_term in searchable_content
+        matches_risk = group.get("risco") in selected_risks
+
+        if matches_search and matches_risk:
+            filtered.append(group)
+
+    if sort_option == "Maior rating":
+        filtered.sort(key=lambda g: g.get("rating", 0), reverse=True)
+    elif sort_option == "Menor rating":
+        filtered.sort(key=lambda g: g.get("rating", 0))
+    elif sort_option == "Mais produtos":
+        filtered.sort(key=lambda g: g.get("quantidade_produtos", 0), reverse=True)
+    else:
+        filtered.sort(key=lambda g: g.get("nome_grupo", ""))
+
+    return filtered
+
+
+def _process_prompt(prompt: str):
+    """Executa o fluxo de orquestração para uma pergunta do usuário."""
+    import datetime
+    import time
+
+    start_time = time.time()
+    now = datetime.datetime.now().strftime("%H:%M")
+
+    st.session_state.chat_history.append({
+        "role": "user",
+        "content": prompt,
+        "timestamp": now,
+    })
+
+    execution_logs = []
+    llm_thought = ""
+    with st.status("Orquestrador em Execução...", expanded=True) as status:
+        thought_container = st.container()
+        with thought_container:
+            st.caption("🧠 FLUXO DE PENSAMENTO DO AGENTE")
+            thought_placeholder = st.empty()
+
+        st.markdown("---")
+
+        log1 = "🧭 Iniciando planejamento de consulta..."
+        st.write(log1)
+        execution_logs.append(log1)
+
+        orchestrator = st.session_state.orchestrator
+        group_context = st.session_state.selected_group
+
+        result = orchestrator.process_query(
+            prompt,
+            ["cadastro", "financeiro", "rentabilidade"],
+            group_context=group_context,
+        )
+
+        raw_thoughts = result.get("agent_thoughts", []) or [result.get("reasoning", "Processando análise...")]
+
+        for thought in raw_thoughts:
+            llm_thought += f"> {thought}\n\n"
+            thought_placeholder.markdown(llm_thought)
+            time.sleep(0.4)
+
+        log2 = "✅ Processamento de agentes concluído."
+        st.write(log2)
+        execution_logs.append(log2)
+
+        status.update(label="Análise finalizada!", state="complete", expanded=False)
+
+    duration = round(time.time() - start_time, 2)
+    response_text = result.get("response", "Não foi possível processar a pergunta.")
+    analysis = result.get("analysis", {"category": "Financeiro", "complexity": "Simples"})
+
+    message_data = {
+        "role": "assistant",
+        "content": response_text,
+        "timestamp": datetime.datetime.now().strftime("%H:%M"),
+        "analysis": analysis,
+        "execution_time": str(duration),
+        "plan": result.get("plan", []),
+        "sources": result.get("sources", []),
+        "subagent_responses": result.get("subagent_responses", []),
+        "visualization_data": result.get("visualization_data"),
+        "ambiguity_result": result.get("ambiguity_result", {}),
+        "execution_logs": execution_logs,
+        "thought": llm_thought,
+    }
+
+    st.session_state.chat_history.append(message_data)
+
+    if "memory_status" in result:
+        st.session_state.memory_status = result["memory_status"]
+
+    st.rerun()
 
 
 def render_login_page():
@@ -196,6 +320,27 @@ def render_group_selection_page():
 
     st.markdown("---")
 
+    col_search, col_risk, col_sort = st.columns([1.5, 1, 1])
+    with col_search:
+        st.text_input(
+            "Buscar grupo",
+            placeholder="Nome, código, CNPJ ou principalidade",
+            key="group_search_term",
+        )
+    with col_risk:
+        st.multiselect(
+            "Filtrar risco",
+            options=["Baixo", "Médio", "Alto"],
+            default=st.session_state.group_risk_filter,
+            key="group_risk_filter",
+        )
+    with col_sort:
+        st.selectbox(
+            "Ordenar por",
+            options=["Maior rating", "Menor rating", "Mais produtos", "Nome (A-Z)"],
+            key="group_sort_option",
+        )
+
     st.markdown("### Configuração do Modelo de IA")
 
     from app.config.models import (
@@ -266,7 +411,17 @@ def render_group_selection_page():
     Escolha um dos grupos econômicos disponíveis para iniciar a análise via chat.
     """)
 
-    groups = st.session_state.available_groups
+    groups = _filter_and_sort_groups(st.session_state.available_groups)
+
+    total_groups = len(st.session_state.available_groups)
+    st.markdown(
+        f"<div class='selection-toolbar'>Exibindo <strong>{len(groups)}</strong> de <strong>{total_groups}</strong> grupos disponíveis.</div>",
+        unsafe_allow_html=True,
+    )
+
+    if not groups:
+        st.warning("Nenhum grupo encontrado com os filtros atuais. Ajuste a busca para continuar.")
+        return
 
     # Grid de Cards Executivos
     cols_per_row = 2
@@ -280,12 +435,12 @@ def render_group_selection_page():
             with cols[i]:
                 is_selected = selected_group_code == group["codigo_grupo"]
                 card_class = "executive-card executive-card-selected" if is_selected else "executive-card"
-                
+
                 rating_val = group["rating"]
                 rating_pct = (rating_val / 10) * 100
-                
+
                 risk_color = "#e53e3e" if group["risco"] == "Alto" else "#dd6b20" if group["risco"] == "Médio" else "#38a169"
-                
+
                 st.markdown(f"""
                 <div class="{card_class}">
                     <div class="executive-card-risk-indicator" style="background-color: {risk_color};">{group["risco"]}</div>
@@ -320,10 +475,10 @@ def render_group_selection_page():
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
-                
+
                 col_btn, col_exp = st.columns([1, 1])
                 with col_btn:
-                    if st.button(f"Selecionar", key=f"sel_{group['codigo_grupo']}", use_container_width=True, type="primary" if is_selected else "secondary"):
+                    if st.button("Selecionar", key=f"sel_{group['codigo_grupo']}", use_container_width=True, type="primary" if is_selected else "secondary"):
                         st.session_state.temp_selected_group_code = group["codigo_grupo"]
                         st.rerun()
                 with col_exp:
@@ -402,7 +557,7 @@ def render_group_header():
 
     active_model = st.session_state.get("active_model", st.session_state.get("selected_model", "N/A"))
     provider = st.session_state.get("selected_provider", "openai").upper()
-    
+
     st.markdown(
         f"""
         <div class="group-header">
@@ -565,7 +720,7 @@ def render_ai_reasoning(message_data):
         analysis = message_data.get("analysis", {})
         category = analysis.get("category", "Geral")
         complexity = analysis.get("complexity", "Simples")
-        
+
         col1, col2 = st.columns(2)
         with col1:
             st.markdown(f"**Categoria:** {category}")
@@ -573,21 +728,21 @@ def render_ai_reasoning(message_data):
             comp_lower = complexity.lower()
             comp_class = f"complexity-{comp_lower}"
             st.markdown(f"**Complexidade:** <span class='complexity-badge {comp_class}'>{complexity}</span>", unsafe_allow_html=True)
-            
+
         st.markdown('<div class="reasoning-panel">', unsafe_allow_html=True)
-        
+
         # Agentes envolvidos
         agents = []
         if "plan" in message_data and message_data["plan"]:
-            agents = list(set([step.get("agent", "Agent") for step in message_data["plan"] if step.get("agent")]))
-        
+            agents = list({step.get("agent", "Agent") for step in message_data["plan"] if step.get("agent")})
+
         steps = [
             ("🧭 Interpretação", "Análise da pergunta e resolução de termos técnicos para garantir precisão."),
             ("🧠 Estratégia", "Definição do plano de consulta aos dados e orquestração de subagentes."),
             ("⚙️ Execução", f"Acionamento dos agentes especializados: {', '.join(agents) if agents else 'Busca de dados'}."),
             ("✅ Validação", "Revisão da consistência dos dados retornados e formatação da resposta final.")
         ]
-        
+
         for title, desc in steps:
             st.markdown(f"""
             <div class="reasoning-step">
@@ -597,9 +752,9 @@ def render_ai_reasoning(message_data):
                 </div>
             </div>
             """, unsafe_allow_html=True)
-            
+
         st.markdown('</div>', unsafe_allow_html=True)
-        
+
         # Tempo (mockado ou real se disponível)
         exec_time = message_data.get("execution_time", "1.2")
         st.markdown(f"⏱️ **Tempo total de execução:** {exec_time}s")
@@ -710,11 +865,28 @@ def render_chat_page():
         unsafe_allow_html=True,
     )
 
+    st.markdown("#### Sugestões rápidas")
+    quick_prompt_cols = st.columns(len(QUICK_PROMPTS))
+    for idx, suggestion in enumerate(QUICK_PROMPTS):
+        with quick_prompt_cols[idx]:
+            if st.button(suggestion, key=f"quick_prompt_{idx}", use_container_width=True):
+                try:
+                    _process_prompt(suggestion)
+                except Exception as e:
+                    st.error(f"Erro na orquestração: {e}")
+                    st.session_state.chat_history.append({
+                        "role": "assistant",
+                        "content": f"Desculpe, ocorreu um erro ao processar sua solicitação: {e}",
+                        "timestamp": "agora",
+                        "is_error": True,
+                    })
+                    st.rerun()
+
     import datetime
-    
+
     for message in st.session_state.chat_history:
         timestamp = message.get("timestamp", datetime.datetime.now().strftime("%H:%M"))
-        
+
         if message["role"] == "user":
             st.markdown(f"""
             <div class="chat-message-user">
@@ -738,12 +910,12 @@ def render_chat_page():
             analysis = message.get("analysis", {})
             category = analysis.get("category", "Geral")
             exec_time = message.get("execution_time", "1.2")
-            
+
             # Agents involved
             agents = []
             if "plan" in message and message["plan"]:
-                agents = list(set([step.get("agent", "Agent") for step in message["plan"] if step.get("agent")]))
-            
+                agents = list({step.get("agent", "Agent") for step in message["plan"] if step.get("agent")})
+
             st.markdown(f"""
             <div class="chat-message-ai">
                 <div class="ai-response-header">
@@ -805,91 +977,12 @@ def render_chat_page():
                 st.rerun()
 
     if prompt := st.chat_input("Digite sua pergunta sobre o grupo..."):
-        import datetime
-        import time
-        
-        start_time = time.time()
-        now = datetime.datetime.now().strftime("%H:%M")
-        
-        st.session_state.chat_history.append({
-            "role": "user", 
-            "content": prompt,
-            "timestamp": now
-        })
-
         try:
-            execution_logs = []
-            llm_thought = ""
-            with st.status("Orquestrador em Execução...", expanded=True) as status:
-                # Placeholder para o raciocínio dinâmico do agente
-                thought_container = st.container()
-                with thought_container:
-                    st.caption("🧠 FLUXO DE PENSAMENTO DO AGENTE")
-                    thought_placeholder = st.empty()
-                
-                st.markdown("---")
-                
-                # Passo 1: Início da Orquestração
-                log1 = "🧭 Iniciando planejamento de consulta..."
-                st.write(log1)
-                execution_logs.append(log1)
-                
-                orchestrator = st.session_state.orchestrator
-                group_context = st.session_state.selected_group
-
-                # Chamada ao orquestrador
-                # Nota: Idealmente o orquestrador deveria suportar um callback para streaming de pensamentos.
-                # Como estamos integrando ao fluxo existente, capturamos os pensamentos gerados no 'result'.
-                result = orchestrator.process_query(
-                    prompt,
-                    ["cadastro", "financeiro", "rentabilidade"],
-                    group_context=group_context,
-                )
-                
-                # Extração dinâmica dos pensamentos do agente (não hardcoded)
-                # O agente escreve no campo 'agent_thoughts' ou 'reasoning' do resultado
-                raw_thoughts = result.get("agent_thoughts", []) or [result.get("reasoning", "Processando análise...")]
-                
-                for thought in raw_thoughts:
-                    llm_thought += f"> {thought}\n\n"
-                    thought_placeholder.markdown(llm_thought)
-                    time.sleep(0.4) # Simula a fluidez da escrita do agente
-                
-                log2 = "✅ Processamento de agentes concluído."
-                st.write(log2)
-                execution_logs.append(log2)
-                
-                status.update(label="Análise finalizada!", state="complete", expanded=False)
-
-            end_time = time.time()
-            duration = round(end_time - start_time, 2)
-
-            response_text = result.get("response", "Não foi possível processar a pergunta.")
-            analysis = result.get("analysis", {"category": "Financeiro", "complexity": "Simples"})
-            
-            message_data = {
-                "role": "assistant",
-                "content": response_text,
-                "timestamp": datetime.datetime.now().strftime("%H:%M"),
-                "analysis": analysis,
-                "execution_time": str(duration),
-                "plan": result.get("plan", []),
-                "sources": result.get("sources", []),
-                "subagent_responses": result.get("subagent_responses", []),
-                "visualization_data": result.get("visualization_data"),
-                "ambiguity_result": result.get("ambiguity_result", {}),
-                "execution_logs": execution_logs,
-                "thought": llm_thought
-            }
-
-            st.session_state.chat_history.append(message_data)
-            
-            if "memory_status" in result:
-                st.session_state.memory_status = result["memory_status"]
-
-            st.rerun()
+            _process_prompt(prompt)
 
         except Exception as e:
+            import datetime
+            now = datetime.datetime.now().strftime("%H:%M")
             st.error(f"Erro na orquestração: {e}")
             st.session_state.chat_history.append({
                 "role": "assistant",
